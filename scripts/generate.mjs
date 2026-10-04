@@ -164,6 +164,43 @@ export function prune(root, manifest) {
   return { agents, clones };
 }
 
+function expandTilde(p) {
+  return p.startsWith("~/") ? path.join(os.homedir(), p.slice(2)) : p;
+}
+
+export function mergeSettings(settingsPath, repoRoot) {
+  const home = os.homedir();
+  const underHome = repoRoot === home || repoRoot.startsWith(home + path.sep);
+  const entry = underHome
+    ? "~/" + path.relative(home, repoRoot) + "/agents"
+    : path.join(repoRoot, "agents");
+  const resolved = path.resolve(repoRoot, "agents");
+
+  let existing = null;
+  if (fs.existsSync(settingsPath)) {
+    try { existing = JSON.parse(fs.readFileSync(settingsPath, "utf8")); }
+    catch { return { changed: false, entry, error: "unparseable settings file, merge skipped" }; }
+  }
+
+  if (existing === null) {
+    fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+    fs.writeFileSync(settingsPath,
+      JSON.stringify({ subagents: { agentScanDirs: [entry] } }, null, 2) + "\n");
+    return { changed: true, entry };
+  }
+
+  const list = Array.isArray(existing?.subagents?.agentScanDirs)
+    ? existing.subagents.agentScanDirs : [];
+  const already = list.some(d => path.resolve(expandTilde(d)) === resolved);
+  if (already) return { changed: false, entry };
+
+  fs.copyFileSync(settingsPath, settingsPath + ".bak");
+  const next = { ...existing,
+    subagents: { ...existing.subagents, agentScanDirs: [...list, entry] } };
+  fs.writeFileSync(settingsPath, JSON.stringify(next, null, 2) + "\n");
+  return { changed: true, entry };
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
   const cmd = process.argv[2];
   if (cmd === "install" || cmd === "update" || cmd === "status") {

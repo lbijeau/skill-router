@@ -217,6 +217,55 @@ test("prune: removes agents and clones not in the manifest", () => {
   clean(root);
 });
 
+test("mergeSettings: creates missing file with only the key", () => {
+  const root = tmp(); const sp = path.join(root, "settings.json");
+  const r = gen.mergeSettings(sp, path.join(os.homedir(), "repositories", "skill-router"));
+  eq(r.changed, true);
+  eq(r.entry, "~/repositories/skill-router/agents");
+  const j = JSON.parse(fs.readFileSync(sp, "utf8"));
+  eq(j.subagents.agentScanDirs.length, 1);
+  clean(root);
+});
+
+test("mergeSettings: appends to existing, writes .bak, idempotent", () => {
+  const root = tmp(); const sp = path.join(root, "settings.json");
+  w(root, "settings.json", JSON.stringify({ something: "else" }));
+  const before = fs.readFileSync(sp, "utf8");
+  const r1 = gen.mergeSettings(sp, root); // root NOT under home -> absolute entry
+  eq(r1.changed, true);
+  eq(r1.entry, path.join(root, "agents"));
+  const j = JSON.parse(fs.readFileSync(sp, "utf8"));
+  eq(j.something, "else");
+  eq(j.subagents.agentScanDirs[0], path.join(root, "agents"));
+  eq(fs.readFileSync(sp + ".bak", "utf8"), before);
+  const r2 = gen.mergeSettings(sp, root);
+  eq(r2.changed, false);
+  eq(JSON.parse(fs.readFileSync(sp, "utf8")).subagents.agentScanDirs.length, 1);
+  clean(root);
+});
+
+test("mergeSettings: equivalent ~ entry means already configured", () => {
+  const root = tmp(); const sp = path.join(root, "settings.json");
+  const repoRoot = path.join(os.homedir(), "repositories", "skill-router");
+  w(root, "settings.json", JSON.stringify(
+    { subagents: { agentScanDirs: [repoRoot + "/agents"] } }));
+  const r = gen.mergeSettings(sp, repoRoot);
+  eq(r.changed, false);
+  clean(root);
+});
+
+test("mergeSettings: unparseable file is never touched", () => {
+  const root = tmp(); const sp = path.join(root, "settings.json");
+  w(root, "settings.json", "{ not json !!!");
+  const before = fs.readFileSync(sp, "utf8");
+  const r = gen.mergeSettings(sp, root);
+  eq(r.changed, false);
+  eq(/unparseable/.test(r.error), true);
+  eq(fs.readFileSync(sp, "utf8"), before);
+  eq(fs.existsSync(sp + ".bak"), false);
+  clean(root);
+});
+
 process.exitCode = await (async () => {
   let failed = 0;
   for (const t of tests) {
