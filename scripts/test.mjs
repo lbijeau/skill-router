@@ -7,7 +7,7 @@ import * as gen from "./generate.mjs";
 
 const tests = [];
 function test(name, fn) { tests.push({ name, fn }); }
-function eq(a, e, msg) { assert.strictEqual(a, e, msg); }
+function eq(a, e, msg) { msg === undefined ? assert.strictEqual(a, e) : assert.strictEqual(a, e, msg); }
 function tmp() { return fs.mkdtempSync(path.join(os.tmpdir(), "sr-")); }
 function w(root, rel, content) {
   const file = path.join(root, rel);
@@ -59,6 +59,21 @@ test("loadManifest rejects missing required fields", () => {
     assert.throws(() => gen.loadManifest(root), new RegExp(`a: missing ${missing}`));
     clean(root);
   }
+});
+
+test("globToRegExp: ** crosses segments, * does not", () => {
+  const re = gen.globToRegExp("skills/in-progress/**");
+  eq(re.test("skills/in-progress/a"), true);
+  eq(re.test("skills/in-progress/a/b"), true);
+  eq(re.test("skills/in-progressX/a"), false);
+  const star = gen.globToRegExp("skills/*/one");
+  eq(star.test("skills/a/one"), true);
+  eq(star.test("skills/a/b/one"), false);
+});
+
+test("globToRegExp: literals are escaped", () => {
+  eq(gen.globToRegExp("a.b/**").test("axb/c"), false);
+  eq(gen.globToRegExp("a.b/**").test("a.b/c"), true);
 });
 
 process.exitCode = await (async () => {

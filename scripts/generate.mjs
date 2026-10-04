@@ -38,6 +38,14 @@ export function loadManifest(root) {
   return { repos: parsed.repos };
 }
 
+export function globToRegExp(pattern) {
+  const escaped = pattern.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, "\\$&");
+  const translated = escaped
+    .replace(/\\\*\\\*/g, ".*")
+    .replace(/\\\*/g, "[^/]*");
+  return new RegExp(`^${translated}$`);
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
   const cmd = process.argv[2];
   if (cmd === "install" || cmd === "update" || cmd === "status") {
