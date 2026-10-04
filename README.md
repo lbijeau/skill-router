@@ -4,6 +4,9 @@ One clean-room pi agent per third-party skills repo. Each generated agent
 sees exactly one repo's skills — no bleed from your normal skill catalog —
 so the agent behaves like that repo's author intended.
 
+The pinned upstream projects and their licenses are listed in
+[ATTRIBUTIONS.md](ATTRIBUTIONS.md).
+
 ## Quickstart
 
 ```sh
