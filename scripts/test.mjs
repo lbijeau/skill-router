@@ -76,6 +76,97 @@ test("globToRegExp: literals are escaped", () => {
   eq(gen.globToRegExp("a.b/**").test("a.b/c"), true);
 });
 
+function skill(root, rel, name) {
+  const dir = path.join(root, rel);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, "SKILL.md"),
+    `---\nname: ${name ?? path.basename(rel)}\ndescription: test skill\n---\n# body\n`);
+}
+
+const E = (over = {}) => ({ name: "x", url: "u", description: "d", persona: "p", ...over });
+
+test("discovery: names come from frontmatter, not dir names", () => {
+  const root = tmp();
+  skill(root, "skills/core");
+  skill(root, "skills/renamed", "other-name");
+  const r = gen.discoverSkills(root, E());
+  eq(r.skills.map(s => s.name).sort().join(","), "core,other-name");
+  clean(root);
+});
+
+test("discovery: nested subtrees, hidden dirs and tests/ are skipped", () => {
+  const root = tmp();
+  skill(root, "src/skills/deep/nested-one");
+  skill(root, ".cursor/skills/hidden-one");
+  skill(root, "tests/fixture/skills/test-one");
+  const r = gen.discoverSkills(root, E());
+  eq(r.skills.length, 1);
+  eq(r.skills[0].name, "nested-one");
+  clean(root);
+});
+
+test("discovery: empty repo and malformed SKILL.md", () => {
+  const root = tmp();
+  w(root, "not-a-skill.md", "no frontmatter here");
+  w(root, "broken/SKILL.md", "name never on a --- line");
+  const r = gen.discoverSkills(root, E());
+  eq(r.skills.length, 0);
+  eq(r.warnings.some(x => /broken/.test(x)), true);
+  clean(root);
+});
+
+test("discovery: CRLF frontmatter name has no stray \\r", () => {
+  const root = tmp();
+  const dir = path.join(root, "crlf"); fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, "SKILL.md"), "---\r\nname: winuser\r\ndescription: d\r\n---\r\n");
+  eq(gen.discoverSkills(root, E()).skills[0].name, "winuser");
+  clean(root);
+});
+
+test("discovery: first sorted path wins collisions, loser reported", () => {
+  const root = tmp();
+  skill(root, "aaa/dup", "dup");
+  skill(root, "zzz/dup", "dup");
+  const r = gen.discoverSkills(root, E());
+  eq(r.skills.length, 1);
+  eq(r.dropped.length, 1);
+  eq(/zzz/.test(r.dropped[0].droppedDir), true);
+  clean(root);
+});
+
+test("discovery: pathExclude ** and * boundaries (spec fixtures)", () => {
+  const root = tmp();
+  skill(root, "skills/wip/a");
+  skill(root, "skills/wip/deep/b");
+  skill(root, "skills/keep/c");
+  skill(root, "skills/a/one");
+  skill(root, "skills/a/deep/one");
+  const dd = gen.discoverSkills(root, E({ pathExclude: ["skills/wip/**", "skills/*/one"] }));
+  eq(dd.skills.map(s => s.name).sort().join(","), "c,one");
+  clean(root);
+});
+
+test("discovery: skillSource narrows the walk root", () => {
+  const root = tmp();
+  skill(root, ".pi/skills/inner/only-here");
+  skill(root, "skills/outside");
+  const r = gen.discoverSkills(root, E({ skillSource: ".pi/skills" }));
+  eq(r.skills.length, 1);
+  eq(r.skills[0].name, "only-here");
+  clean(root);
+});
+
+test("discovery: corrupter names are skipped with a warning", () => {
+  const root = tmp();
+  skill(root, "skills/bad", "a,b");
+  skill(root, "skills/colon", "a:b");
+  skill(root, "skills/good");
+  const r = gen.discoverSkills(root, E());
+  eq(r.skills.map(s => s.name).join(","), "good");
+  eq(r.warnings.filter(x => /name/.test(x)).length, 2);
+  clean(root);
+});
+
 process.exitCode = await (async () => {
   let failed = 0;
   for (const t of tests) {
