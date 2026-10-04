@@ -76,7 +76,10 @@ Fields:
 
 - `name` — agent name and clone dir name. Lowercase letters, digits,
   hyphens; no leading/trailing/consecutive hyphens (agent-name rules).
-- `url` — git clone URL (GitHub https).
+- `url` — git clone URL. Must be an `https` GitHub URL or a `file://`
+  local mirror; dash-leading values and other transports are rejected at
+  load time — a manifest url must never parse as a git option
+  (e.g. `--upload-pack=` executes at clone time).
 - `description` — one-liner shown in the agent catalog (advertise text).
 - `persona` — full body of the generated agent's system prompt.
 - `skillSource` — optional. Subdirectory (relative to the clone) to scan
@@ -143,14 +146,20 @@ Single file, node ≥ 18, standard library only. Commands:
 
 Same as `install`, except existing clones get
 `git pull --ff-only` (a non-ff state is reported as a per-entry warning and
-left alone). The summary additionally reports skill-list deltas per agent
+left alone). A clone whose `origin` no longer matches the manifest `url`
+is removed and re-cloned from the manifest — the manifest is the source of
+truth for remotes, not the clone's history. The summary additionally
+reports skill-list deltas per agent
 (e.g. `superpowers: +2 -1`) so churn is visible in one glance.
 
 ### Prune
 
 `install` and `update` both prune orphans after processing the manifest:
 for every `agents/<name>.md` or `skills/<name>/` whose `<name>` is not in
-the current manifest, remove it and report `pruned <name>`. This keeps
+the current manifest, remove it and report `pruned <name>`. Agent files
+are pruned only when they are skill-router's own output — identified by the
+`skillPath: ../skills/<name>` line — so a user-authored agent dropped into
+`agents/` survives. This keeps
 "everything is derived from the manifest" true across removals and renames
 (a rename is a remove plus a re-clone).
 
@@ -177,11 +186,15 @@ entry therefore never forces a non-zero exit on its own.
   dropped before name resolution.
 - Skill name = frontmatter `name:` field; falls back to the directory name
   only if the field is absent or empty.
-- Deterministic: walk paths are sorted lexicographically; on an in-repo name
-  collision the first (in sorted order) wins — mirroring pi's own
-  first-discovered-wins semantics. Every dropped duplicate is reported in
+- Deterministic: the walk is depth-first pre-order with directory entries
+  sorted at each level; on an in-repo name collision the first (in pre-order)
+  wins — mirroring pi's own first-discovered-wins semantics. Every dropped
+  duplicate is reported in
   the install/update/status output as `name: kept <path>, dropped <path>`
   so curation can respond with `skillSource`/`pathExclude`.
+- Symlinked directories and files are not followed: the walk sees them as
+  neither directories nor `SKILL.md` files (deliberate: avoids cycles and
+  phantom skills).
 - A repo with zero discoverable skills is not an error: it is reported and
   no agent file is generated for it (see Failure handling).
 
@@ -236,7 +249,9 @@ Your skills encode how you work.
   entry (`~`-expanded, real-path-compared) is not already present in the
   existing array.
 - A backup of the previous settings file is written to
-  `~/.pi/agent/settings.json.bak` before the write.
+  `~/.pi/agent/settings.json.bak` before the write. Both writes are atomic
+  (temp file + rename); the `.bak` file is replaced, never written through,
+  so a pre-existing `.bak` symlink cannot redirect the backup.
 - The command prints exactly what it changed (or "already configured").
 - If the settings file does not exist, it is created with only this key.
 
@@ -272,19 +287,29 @@ Run via `node scripts/test.mjs`; exits non-zero on failure.
 ## Assumptions to validate on first run
 
 The clean-room guarantee rests on pi behaviors that are documented but not
-exercised by the offline fixture tests. Validate once on a real pi install
-after the first `install`; record the outcome here (with date) when done:
+exercised by the offline fixture tests. **Validated on 2026-10-04** on a
+real pi install (pi-subagents via `subagents.agentScanDirs`, parent
+session cwd outside this repo):
 
-1. An agent discovered via `subagents.agentScanDirs` resolves
-   `skillPath: ../skills/<name>` against the agent file's real location in
-   this repo, not against the scan-dir entry as written in settings.
-2. With `inheritSkills: false` plus an explicit `skills:` list, the child
-   sees exactly the listed skills — no bleed from the parent's catalog.
-3. A `skills:` entry whose name no longer exists in the `skillPath`
-   discovery set (upstream renamed a skill between `update` and launch) is
-   ignored or warned, not fatal to the launch.
-4. When two skills in the same `skillPath` share a declared name, behavior
-   matches first-discovered-wins (pi's documented collision semantics).
+1. **Scan-dir `skillPath` resolution — confirmed.** The `diagram-design`
+   agent launched and advertised its skill; `skillPath: ../skills/<name>`
+   resolved against the agent file's real location in this repo.
+2. **Clean-room no-bleed — confirmed.** Asked to list its skills, the child
+   replied exactly `diagram-design` — none of the parent session's ~30
+   installed skills.
+3. **Missing-skill-name tolerance — confirmed.** With the generated file
+   tampered to advertise `diagram-design, nonexistent-skill`, the launch
+   was not fatal; the child ran and advertised only the resolvable skill.
+4. **Collision semantics — generator side pinned by tests** (sorted
+   pre-order, first-found wins); **pi side validated against docs**
+   ("Name collisions keep the first discovered skill and produce a
+   warning"). No runtime exercise — none of the 9 roster agents currently
+   has a name collision.
+
+Real-run note: `graphify` ships a lowercase `skill.md` (not valid per the
+agentskills spec); with case-exact discovery it correctly yields no agent.
+Case-exactness matters on case-insensitive filesystems (macOS APFS), where
+`fs.existsSync("SKILL.md")` otherwise matches the lowercase file.
 
 ## Risks / unknowns
 
