@@ -272,19 +272,29 @@ Run via `node scripts/test.mjs`; exits non-zero on failure.
 ## Assumptions to validate on first run
 
 The clean-room guarantee rests on pi behaviors that are documented but not
-exercised by the offline fixture tests. Validate once on a real pi install
-after the first `install`; record the outcome here (with date) when done:
+exercised by the offline fixture tests. **Validated on 2026-10-04** on a
+real pi install (pi-subagents via `subagents.agentScanDirs`, parent
+session cwd outside this repo):
 
-1. An agent discovered via `subagents.agentScanDirs` resolves
-   `skillPath: ../skills/<name>` against the agent file's real location in
-   this repo, not against the scan-dir entry as written in settings.
-2. With `inheritSkills: false` plus an explicit `skills:` list, the child
-   sees exactly the listed skills — no bleed from the parent's catalog.
-3. A `skills:` entry whose name no longer exists in the `skillPath`
-   discovery set (upstream renamed a skill between `update` and launch) is
-   ignored or warned, not fatal to the launch.
-4. When two skills in the same `skillPath` share a declared name, behavior
-   matches first-discovered-wins (pi's documented collision semantics).
+1. **Scan-dir `skillPath` resolution — confirmed.** The `diagram-design`
+   agent launched and advertised its skill; `skillPath: ../skills/<name>`
+   resolved against the agent file's real location in this repo.
+2. **Clean-room no-bleed — confirmed.** Asked to list its skills, the child
+   replied exactly `diagram-design` — none of the parent session's ~30
+   installed skills.
+3. **Missing-skill-name tolerance — confirmed.** With the generated file
+   tampered to advertise `diagram-design, nonexistent-skill`, the launch
+   was not fatal; the child ran and advertised only the resolvable skill.
+4. **Collision semantics — generator side pinned by tests** (sorted
+   pre-order, first-found wins); **pi side validated against docs**
+   ("Name collisions keep the first discovered skill and produce a
+   warning"). No runtime exercise — none of the 9 roster agents currently
+   has a name collision.
+
+Real-run note: `graphify` ships a lowercase `skill.md` (not valid per the
+agentskills spec); with case-exact discovery it correctly yields no agent.
+Case-exactness matters on case-insensitive filesystems (macOS APFS), where
+`fs.existsSync("SKILL.md")` otherwise matches the lowercase file.
 
 ## Risks / unknowns
 
