@@ -413,6 +413,16 @@ test("install: reused clone reported dirty when locally modified", () => {
   clean(root);
 });
 
+test("discovery: SKILL.md match is case-exact (portable to Linux)", () => {
+  const root = tmp();
+  const lower = path.join(root, "lower"); fs.mkdirSync(lower, { recursive: true });
+  fs.writeFileSync(path.join(lower, "skill.md"), "---\nname: lower\ndescription: d\n---\nx\n");
+  skill(root, "exact/x");
+  const r = gen.discoverSkills(root, E());
+  eq(r.skills.map(s => s.name).join(","), "x");
+  clean(root);
+});
+
 process.exitCode = await (async () => {
   let failed = 0;
   for (const t of tests) {

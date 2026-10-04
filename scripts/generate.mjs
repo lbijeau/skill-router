@@ -49,10 +49,10 @@ export function globToRegExp(pattern) {
 const SKIP_DIRS = new Set([".git", "node_modules", "tests", "test"]);
 
 function walkSkillDirs(dir, out = []) {
-  if (fs.existsSync(path.join(dir, "SKILL.md"))) out.push(dir);
   let entries;
   try { entries = fs.readdirSync(dir, { withFileTypes: true }); }
   catch { return out; }
+  if (entries.some(e => e.isFile() && e.name === "SKILL.md")) out.push(dir);
   const children = entries
     .filter(e => e.isDirectory())
     .map(e => e.name)
