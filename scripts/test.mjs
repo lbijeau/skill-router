@@ -441,6 +441,42 @@ test("renderAgentFile: multi-line description is escaped into one YAML line", ()
   eq(out.split("\n")[2], 'description: "line1\\nline2"');
 });
 
+test("install: clone failure leaves pre-existing agent file untouched", () => {
+  const root = tmp(); const sp = path.join(root, "settings.json");
+  const remote = bareRemote(root); remote.add(path.join("skills", "one"), "one");
+  w(root, "repos.json", JSON.stringify({ repos: [
+    { name: "a", url: remote.url, description: "d", persona: "p" },
+    { name: "b", url: "file://" + path.join(root, "nope.git"), description: "d", persona: "p" },
+  ]}));
+  w(root, "agents/b.md", "previously generated agent");
+  const r = gen.runInstall(root, sp);
+  eq(r.exitCode, 1);
+  eq(fs.readFileSync(path.join(root, "agents/b.md"), "utf8"), "previously generated agent");
+  clean(root);
+});
+
+test("discovery: unclosed frontmatter is skipped with a warning", () => {
+  const root = tmp();
+  w(root, "hijack/SKILL.md", "---\ndescription: d\n\n# Usage\n\nname: hijacked-name\n");
+  const r = gen.discoverSkills(root, E());
+  eq(r.skills.length, 0);
+  eq(r.warnings.some(x => /hijack/.test(x) && /closing/.test(x)), true);
+  clean(root);
+});
+
+test("mergeSettings: symlinked existing entry is recognized as equivalent", () => {
+  const root = tmp();
+  const real = path.join(root, "real");
+  fs.mkdirSync(real, { recursive: true });
+  fs.symlinkSync(real, path.join(root, "link"));
+  const sp = path.join(root, "settings.json");
+  w(root, "settings.json", JSON.stringify(
+    { subagents: { agentScanDirs: [path.join(root, "link", "agents")] } }));
+  const r = gen.mergeSettings(sp, real);
+  eq(r.changed, false);
+  clean(root);
+});
+
 process.exitCode = await (async () => {
   let failed = 0;
   for (const t of tests) {

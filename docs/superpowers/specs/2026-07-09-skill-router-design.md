@@ -177,11 +177,15 @@ entry therefore never forces a non-zero exit on its own.
   dropped before name resolution.
 - Skill name = frontmatter `name:` field; falls back to the directory name
   only if the field is absent or empty.
-- Deterministic: walk paths are sorted lexicographically; on an in-repo name
-  collision the first (in sorted order) wins — mirroring pi's own
-  first-discovered-wins semantics. Every dropped duplicate is reported in
+- Deterministic: the walk is depth-first pre-order with directory entries
+  sorted at each level; on an in-repo name collision the first (in pre-order)
+  wins — mirroring pi's own first-discovered-wins semantics. Every dropped
+  duplicate is reported in
   the install/update/status output as `name: kept <path>, dropped <path>`
   so curation can respond with `skillSource`/`pathExclude`.
+- Symlinked directories and files are not followed: the walk sees them as
+  neither directories nor `SKILL.md` files (deliberate: avoids cycles and
+  phantom skills).
 - A repo with zero discoverable skills is not an error: it is reported and
   no agent file is generated for it (see Failure handling).
 

@@ -82,11 +82,16 @@ export function discoverSkills(cloneDir, entry) {
       continue;
     }
     let name = null;
+    let closed = false;
     for (let i = 1; i < lines.length; i++) {
       const line = lines[i].trimEnd();
-      if (line === "---") break;
+      if (line === "---") { closed = true; break; }
       const m = line.match(/^name:[ \t]*(.*?)[ \t]*$/);
-      if (m) { name = m[1]; break; }
+      if (m) name = m[1];
+    }
+    if (!closed) {
+      warnings.push(`malformed frontmatter in ${file}: no closing ---`);
+      continue;
     }
     if (name === null || name === "") name = path.basename(dir);
     if (!NAME_RE.test(name) || name.length > 64) {
@@ -123,11 +128,12 @@ export function renderAgentFile(entry, skillNames) {
   ].join("\n");
 }
 
-export function writeAgentFiles(root, manifest) {
+export function writeAgentFiles(root, manifest, skip = new Set()) {
   const agentsDir = path.join(root, "agents");
   fs.mkdirSync(agentsDir, { recursive: true });
   const written = [], removed = [], warnings = [], dropped = [];
   for (const entry of manifest.repos) {
+    if (skip.has(entry.name)) continue;
     const found = discoverSkills(path.join(root, "skills", entry.name), entry);
     warnings.push(...found.warnings);
     dropped.push(...found.dropped);
@@ -172,6 +178,20 @@ function expandTilde(p) {
   return p.startsWith("~/") ? path.join(os.homedir(), p.slice(2)) : p;
 }
 
+function realPath(p) {
+  let cur = p;
+  let tail = "";
+  while (true) {
+    try { return path.join(fs.realpathSync(cur), tail); }
+    catch {
+      const next = path.dirname(cur);
+      if (next === cur) return path.resolve(p);
+      tail = path.join(path.basename(cur), tail);
+      cur = next;
+    }
+  }
+}
+
 export function mergeSettings(settingsPath, repoRoot) {
   const home = os.homedir();
   const underHome = repoRoot === home || repoRoot.startsWith(home + path.sep);
@@ -195,7 +215,7 @@ export function mergeSettings(settingsPath, repoRoot) {
 
   const list = Array.isArray(existing?.subagents?.agentScanDirs)
     ? existing.subagents.agentScanDirs : [];
-  const already = list.some(d => path.resolve(expandTilde(d)) === resolved);
+  const already = list.some(d => realPath(expandTilde(d)) === realPath(resolved));
   if (already) return { changed: false, entry };
 
   fs.copyFileSync(settingsPath, settingsPath + ".bak");
@@ -264,6 +284,7 @@ function runFlow(root, settingsPath, mode) {
     }
   }
   const states = [];
+  const failed = new Set();
   for (const entry of manifest.repos) {
     const cloneDir = path.join(root, "skills", entry.name);
     const doClone = () => {
@@ -271,6 +292,7 @@ function runFlow(root, settingsPath, mode) {
       if (r.status !== 0) {
         const last = (r.stderr || "git clone failed").trim().split("\n").pop();
         report.push(`${entry.name}: clone failed (${last})`);
+        failed.add(entry.name);
         anyFailed = true;
         return false;
       }
@@ -296,10 +318,13 @@ function runFlow(root, settingsPath, mode) {
     }
     states.push({ entry, state });
   }
-  const genResult = writeAgentFiles(root, manifest);
+  const genResult = writeAgentFiles(root, manifest, failed);
   for (const warn of genResult.warnings) report.push(warn);
   for (const d of genResult.dropped) {
     report.push(`${d.name}: kept ${d.keptDir}, dropped ${d.droppedDir}`);
+  }
+  for (const name of genResult.removed) {
+    report.push(`${name}: 0 skills, removed stale agent`);
   }
   for (const { entry, state } of states) {
     const found = discoverSkills(path.join(root, "skills", entry.name), entry);
