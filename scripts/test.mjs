@@ -477,6 +477,47 @@ test("mergeSettings: symlinked existing entry is recognized as equivalent", () =
   clean(root);
 });
 
+test("loadManifest rejects pathExclude that is not an array of strings", () => {
+  const root = tmp();
+  w(root, "repos.json", JSON.stringify({ repos: [
+    { name: "a", url: "u", description: "d", persona: "p", pathExclude: "skills/x/**" }]}));
+  assert.throws(() => gen.loadManifest(root), /pathExclude must be an array/);
+  clean(root);
+});
+
+test("loadManifest rejects skillSource escaping the clone", () => {
+  for (const bad of ["../other", "..", "/abs/skills"]) {
+    const root = tmp();
+    w(root, "repos.json", JSON.stringify({ repos: [
+      { name: "a", url: "u", description: "d", persona: "p", skillSource: bad }]}));
+    assert.throws(() => gen.loadManifest(root), /skillSource/);
+    clean(root);
+  }
+});
+
+test("mergeSettings: settings file containing null is backed up before write", () => {
+  const root = tmp(); const sp = path.join(root, "settings.json");
+  w(root, "settings.json", "null");
+  const r = gen.mergeSettings(sp, root);
+  eq(r.changed, true);
+  eq(fs.readFileSync(sp + ".bak", "utf8"), "null");
+  eq(JSON.parse(fs.readFileSync(sp, "utf8")).subagents.agentScanDirs[0], path.join(root, "agents"));
+  clean(root);
+});
+
+test("install: unparseable settings reports only the skipped line", () => {
+  const root = tmp(); const sp = path.join(root, "settings.json");
+  const remote = bareRemote(root); remote.add(path.join("skills", "one"), "one");
+  w(root, "repos.json", JSON.stringify({ repos: [
+    { name: "a", url: remote.url, description: "d", persona: "p" }]}));
+  w(root, "settings.json", "{ not json");
+  const r = gen.runInstall(root, sp);
+  eq(r.exitCode, 0);
+  eq(r.report.filter(l => l.startsWith("settings:")).length, 1);
+  eq(/skipped/.test(r.report.find(l => l.startsWith("settings:"))), true);
+  clean(root);
+});
+
 process.exitCode = await (async () => {
   let failed = 0;
   for (const t of tests) {

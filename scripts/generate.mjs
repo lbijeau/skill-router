@@ -30,6 +30,21 @@ export function loadManifest(root) {
         throw new Error(`${entry.name}: missing ${field}`);
       }
     }
+    if (entry.pathExclude !== undefined) {
+      if (!Array.isArray(entry.pathExclude)
+        || entry.pathExclude.some(p => typeof p !== "string" || p.length === 0)) {
+        throw new Error(`${entry.name}: pathExclude must be an array of strings`);
+      }
+    }
+    if (entry.skillSource !== undefined) {
+      if (typeof entry.skillSource !== "string" || entry.skillSource.length === 0) {
+        throw new Error(`${entry.name}: skillSource must be a string`);
+      }
+      const src = path.normalize(entry.skillSource);
+      if (path.isAbsolute(src) || src === ".." || src.startsWith("../")) {
+        throw new Error(`${entry.name}: skillSource must be a relative path inside the clone`);
+      }
+    }
     if (seen.has(entry.name)) {
       throw new Error(`duplicate name: ${entry.name}`);
     }
@@ -200,13 +215,14 @@ export function mergeSettings(settingsPath, repoRoot) {
     : path.join(repoRoot, "agents");
   const resolved = path.resolve(repoRoot, "agents");
 
-  let existing = null;
-  if (fs.existsSync(settingsPath)) {
+  let existing;
+  const existed = fs.existsSync(settingsPath);
+  if (existed) {
     try { existing = JSON.parse(fs.readFileSync(settingsPath, "utf8")); }
     catch { return { changed: false, entry, error: "unparseable settings file, merge skipped" }; }
   }
 
-  if (existing === null) {
+  if (!existed) {
     fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
     fs.writeFileSync(settingsPath,
       JSON.stringify({ subagents: { agentScanDirs: [entry] } }, null, 2) + "\n");
@@ -220,7 +236,7 @@ export function mergeSettings(settingsPath, repoRoot) {
 
   fs.copyFileSync(settingsPath, settingsPath + ".bak");
   const next = { ...existing,
-    subagents: { ...existing.subagents, agentScanDirs: [...list, entry] } };
+    subagents: { ...existing?.subagents, agentScanDirs: [...list, entry] } };
   fs.writeFileSync(settingsPath, JSON.stringify(next, null, 2) + "\n");
   return { changed: true, entry };
 }
@@ -347,10 +363,13 @@ function runFlow(root, settingsPath, mode) {
   for (const a of pruned.agents) report.push(`pruned ${a} (agent)`);
   for (const c of pruned.clones) report.push(`pruned ${c} (clone)`);
   const settings = mergeSettings(settingsPath, root);
-  report.push(settings.changed
-    ? `settings: added ${settings.entry}`
-    : `settings: already configured (${settings.entry})`);
-  if (settings.error) report.push(`settings: skipped (${settings.error})`);
+  if (settings.error) {
+    report.push(`settings: skipped (${settings.error})`);
+  } else {
+    report.push(settings.changed
+      ? `settings: added ${settings.entry}`
+      : `settings: already configured (${settings.entry})`);
+  }
   return { exitCode: anyFailed ? 1 : 0, report };
 }
 
