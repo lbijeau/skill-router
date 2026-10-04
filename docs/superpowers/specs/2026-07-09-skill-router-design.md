@@ -79,6 +79,28 @@ Fields:
 - `url` — git clone URL (GitHub https).
 - `description` — one-liner shown in the agent catalog (advertise text).
 - `persona` — full body of the generated agent's system prompt.
+- `skillSource` — optional. Subdirectory (relative to the clone) to scan
+  instead of the repo root, when a repo ships the same skill in multiple
+  tool-specific locations. Example: `".pi/skills"`.
+- `pathExclude` — optional. Glob patterns matched against skill-dir paths
+  (relative to the clone); matching skills are dropped. Example:
+  `"skills/in-progress/**"`. Glob semantics: globstar — `*` matches within
+  one path segment, `**` matches across segments. Matching is implemented
+  in the generator (no dependency); the full pattern set is `*`, `**`, and
+  literal characters, nothing else.
+
+Initial curation decisions (evidence from a 2026-07-09 probe of all 10
+repos, see Risks):
+
+- `impeccable`: `skillSource: ".pi/skills"` — the repo ships the one skill
+  in ~20 tool-specific bundles and the copies have drifted (different
+  checksums); `.pi/skills` is the canonical pi bundle.
+- `mattpocock`: `pathExclude: ["skills/in-progress/**"]` — the repo author
+  marks 6 skills as in-progress; the agent should pin the stable 31.
+- All other repos: no filter needed; the built-in skip rules (hidden dirs,
+  `.git`, `node_modules`, `tests/`, `test/`) already select the canonical
+  trees (e.g. `ponytail`'s `.openclaw/` mirror, `i-have-adhd`'s `.cursor/`
+  mirror are hidden dirs and skipped).
 
 Initial entries (10):
 
@@ -131,13 +153,18 @@ Read-only table per entry: clone state (`ok` / `missing` / `not-a-repo` /
 
 ### Skill discovery
 
-- Recursive walk of the clone for directories containing `SKILL.md`,
-  skipping `.git`, `node_modules`, and hidden dirs.
+- Recursive walk starting at `skillSource` (default: repo root) for
+  directories containing `SKILL.md`, skipping `.git`, `node_modules`,
+  `tests/`, `test/`, and hidden dirs (dot-dirs).
+- Skills whose relative dir path matches any `pathExclude` pattern are
+  dropped before name resolution.
 - Skill name = frontmatter `name:` field; falls back to the directory name
   only if the field is absent or empty.
 - Deterministic: walk paths are sorted lexicographically; on an in-repo name
   collision the first (in sorted order) wins — mirroring pi's own
-  first-discovered-wins semantics.
+  first-discovered-wins semantics. Every dropped duplicate is reported in
+  the install/update/status output as `name: kept <path>, dropped <path>`
+  so curation can respond with `skillSource`/`pathExclude`.
 - A repo with zero discoverable skills is not an error: it is reported and
   no agent file is generated for it (see Failure handling).
 
@@ -214,18 +241,34 @@ Assertions:
 - Empty repo produces no agent file, does not fail the run.
 - Re-running generation on unchanged inputs produces byte-identical files.
 - `status` reports `stale` when the manifest's persona changes.
+- A fixture with the same skill name in two non-hidden trees: winner is the
+  sorted-first path and the loser is reported as dropped.
 
 Run via `node scripts/test.mjs`; exits non-zero on failure.
 
 ## Risks / unknowns
 
-- Some of the 10 repos may not be pure skills repos (may ship packages,
-  prompts, agents, or have no `SKILL.md` at all). The pipeline degrades
-  gracefully, but the initial agent roster may be < 10. Acceptable: the
-  manifest stays as the list of intents, `update` picks up repos that gain
-  skills later.
+**Verified initial roster** (2026-07-09, shallow clones of all 10 repos,
+applying this spec's discovery rules + the curation decisions above):
+
+| agent | skills | notes |
+|---|---|---|
+| `ponytail` | 6 | `.openclaw/` mirror skipped (hidden) |
+| `mattpocock` | 31 | 6 in-progress excluded |
+| `i-have-adhd` | 1 | `.cursor/` mirror skipped (hidden) |
+| `security-audit` | 1 | |
+| `superpowers` | 15 | |
+| `diagram-design` | 1 | |
+| `humanizer` | 1 | `SKILL.md` at repo root |
+| `impeccable` | 1 | `skillSource: .pi/skills`; 23 drifted copies ignored |
+| `addyosmani` | 25 | |
+| `graphify` | 0 | **no agent generated** — repo ships no skills |
+
+Total: 9 agents, 82 skills. `graphify` stays in the manifest as an intent;
+`update` will generate its agent if the repo ever gains skills.
+
 - Upstream repos can rename or restructure skills; `update`'s delta report
-  is the safety net.
+  and duplicate-dropped report are the safety net.
 - `agentScanDirs` is a pi-subagents settings key; if the user runs pi
   without pi-subagents, the agents are simply not discovered (no other
   effect on the pi install).
