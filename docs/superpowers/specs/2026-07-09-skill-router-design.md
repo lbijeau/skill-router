@@ -129,11 +129,15 @@ Single file, node ≥ 18, standard library only. Commands:
 1. For each manifest entry (in file order):
    - `skills/<name>/` absent → `git clone --depth 1 <url> skills/<name>`.
    - Present and a git repo → reuse (no pull; `install` never mutates
-     existing clones).
+     existing clones). If the clone's working tree has local modifications,
+     the summary reports `reused (dirty)` instead of `reused`, so divergence
+     from the upstream tip is visible.
    - Present but **not** a git repo → remove, re-clone.
 2. Discover skills in each clone (below), generate `agents/<name>.md`.
 3. Merge the agent scan dir into user settings (below).
-4. Print a per-entry summary: cloned/reused, N skills, agent written.
+4. Prune orphans (below).
+5. Print a per-entry summary: cloned/reused(/dirty), N skills, agent
+   written, prune results.
 
 ### `update`
 
@@ -141,6 +145,14 @@ Same as `install`, except existing clones get
 `git pull --ff-only` (a non-ff state is reported as a per-entry warning and
 left alone). The summary additionally reports skill-list deltas per agent
 (e.g. `superpowers: +2 -1`) so churn is visible in one glance.
+
+### Prune
+
+`install` and `update` both prune orphans after processing the manifest:
+for every `agents/<name>.md` or `skills/<name>/` whose `<name>` is not in
+the current manifest, remove it and report `pruned <name>`. This keeps
+"everything is derived from the manifest" true across removals and renames
+(a rename is a remove plus a re-clone).
 
 The generator resolves all paths relative to the repo root (the parent of
 `scripts/`), so any command works from any cwd.
@@ -150,6 +162,11 @@ The generator resolves all paths relative to the repo root (the parent of
 Read-only table per entry: clone state (`ok` / `missing` / `not-a-repo` /
 `dirty`), skill count, agent file state (`in-sync` / `stale` /
 `missing`). Exit 0 unless any entry is not `ok`+`in-sync`.
+
+Expected absence: an entry with zero discoverable skills has no agent file
+by design. Its agent state is `in-sync` when no `agents/<name>.md` exists,
+and `stale` when one does (a leftover that prune removes). A zero-skill
+entry therefore never forces a non-zero exit on its own.
 
 ### Skill discovery
 
@@ -243,12 +260,36 @@ Assertions:
 - `status` reports `stale` when the manifest's persona changes.
 - A fixture with the same skill name in two non-hidden trees: winner is the
   sorted-first path and the loser is reported as dropped.
+- `pathExclude` fixtures: a `**` pattern matches across path segments and
+  drops its targets; a `*` pattern within one segment does not cross a
+  segment boundary (both directions asserted).
+- A `skillSource` fixture: a skill reachable only inside the configured
+  subdirectory is discovered; a same-named skill outside it is not.
+- A zero-skill entry yields exit 0 from `status` (expected absence).
 
 Run via `node scripts/test.mjs`; exits non-zero on failure.
 
+## Assumptions to validate on first run
+
+The clean-room guarantee rests on pi behaviors that are documented but not
+exercised by the offline fixture tests. Validate once on a real pi install
+after the first `install`; record the outcome here (with date) when done:
+
+1. An agent discovered via `subagents.agentScanDirs` resolves
+   `skillPath: ../skills/<name>` against the agent file's real location in
+   this repo, not against the scan-dir entry as written in settings.
+2. With `inheritSkills: false` plus an explicit `skills:` list, the child
+   sees exactly the listed skills — no bleed from the parent's catalog.
+3. A `skills:` entry whose name no longer exists in the `skillPath`
+   discovery set (upstream renamed a skill between `update` and launch) is
+   ignored or warned, not fatal to the launch.
+4. When two skills in the same `skillPath` share a declared name, behavior
+   matches first-discovered-wins (pi's documented collision semantics).
+
 ## Risks / unknowns
 
-**Verified initial roster** (2026-07-09, shallow clones of all 10 repos,
+**Verified initial roster**
+ (2026-07-09, shallow clones of all 10 repos,
 applying this spec's discovery rules + the curation decisions above):
 
 | agent | skills | notes |
