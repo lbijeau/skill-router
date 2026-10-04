@@ -34,8 +34,8 @@ test("loadManifest returns entries with optional fields", () => {
 test("loadManifest rejects duplicate names", () => {
   const root = tmp();
   w(root, "repos.json", JSON.stringify({ repos: [
-    { name: "a", url: "u", description: "d", persona: "p" },
-    { name: "a", url: "u2", description: "d", persona: "p" },
+    { name: "a", url: "https://github.com/x/y", description: "d", persona: "p" },
+    { name: "a", url: "https://github.com/x/y2", description: "d", persona: "p" },
   ]}));
   assert.throws(() => gen.loadManifest(root), /duplicate name: a/);
   clean(root);
@@ -45,7 +45,7 @@ test("loadManifest rejects invalid names", () => {
   for (const bad of ["Bad_Name", "-x", "x-", "a--b", "a b"]) {
     const root = tmp();
     w(root, "repos.json", JSON.stringify({ repos: [
-      { name: bad, url: "u", description: "d", persona: "p" }]}));
+      { name: bad, url: "https://github.com/x/y", description: "d", persona: "p" }]}));
     assert.throws(() => gen.loadManifest(root), /invalid name/);
     clean(root);
   }
@@ -54,7 +54,7 @@ test("loadManifest rejects invalid names", () => {
 test("loadManifest rejects missing required fields", () => {
   for (const missing of ["url", "description", "persona"]) {
     const root = tmp();
-    const entry = { name: "a", url: "u", description: "d", persona: "p" };
+    const entry = { name: "a", url: "https://github.com/x/y", description: "d", persona: "p" };
     delete entry[missing];
     w(root, "repos.json", JSON.stringify({ repos: [entry] }));
     assert.throws(() => gen.loadManifest(root), new RegExp(`a: missing ${missing}`));
@@ -84,7 +84,7 @@ function skill(root, rel, name) {
     `---\nname: ${name ?? path.basename(rel)}\ndescription: test skill\n---\n# body\n`);
 }
 
-const E = (over = {}) => ({ name: "x", url: "u", description: "d", persona: "p", ...over });
+const E = (over = {}) => ({ name: "x", url: "https://github.com/x/y", description: "d", persona: "p", ...over });
 
 test("discovery: names come from frontmatter, not dir names", () => {
   const root = tmp();
@@ -169,7 +169,7 @@ test("discovery: corrupter names are skipped with a warning", () => {
 });
 
 test("renderAgentFile: exact bytes, YAML-escaped description", () => {
-  const entry = { name: "ponytail", url: "u",
+  const entry = { name: "ponytail", url: "https://github.com/x/y",
     description: `Blunt: says "no"`,
     persona: "You are Ponytail." };
   eq(gen.renderAgentFile(entry, ["ponytail", "ponytail-review"]),
@@ -187,8 +187,8 @@ You are Ponytail.
 test("writeAgentFiles: writes, idempotent, removes zero-skill leftovers", () => {
   const root = tmp();
   w(root, "repos.json", JSON.stringify({ repos: [
-    { name: "one", url: "u", description: "d", persona: "p" },
-    { name: "zero", url: "u", description: "d", persona: "p" },
+    { name: "one", url: "https://github.com/x/y", description: "d", persona: "p" },
+    { name: "zero", url: "https://github.com/x/y", description: "d", persona: "p" },
   ]}));
   skill(root, "skills/one/a");
   w(root, "agents/zero.md", "stale leftover");
@@ -205,9 +205,9 @@ test("writeAgentFiles: writes, idempotent, removes zero-skill leftovers", () => 
 test("prune: removes agents and clones not in the manifest", () => {
   const root = tmp();
   w(root, "repos.json", JSON.stringify({ repos: [
-    { name: "one", url: "u", description: "d", persona: "p" }]}));
+    { name: "one", url: "https://github.com/x/y", description: "d", persona: "p" }]}));
   w(root, "agents/one.md", "keep");
-  w(root, "agents/orphan.md", "drop");
+  w(root, "agents/orphan.md", "---\nname: orphan\nskillPath: ../skills/orphan\n---\nx\n");
   w(root, "skills/one/keep.txt", "keep");
   w(root, "skills/orphan/junk.txt", "drop");
   const r = gen.prune(root, gen.loadManifest(root));
@@ -279,8 +279,8 @@ function gitRepo(dir) {
 test("status: exit rules incl. expected absence for zero-skill entries", () => {
   const root = tmp();
   const manifest = { repos: [
-    { name: "one", url: "u", description: "d", persona: "p" },
-    { name: "zero", url: "u", description: "d", persona: "p" },
+    { name: "one", url: "https://github.com/x/y", description: "d", persona: "p" },
+    { name: "zero", url: "https://github.com/x/y", description: "d", persona: "p" },
   ]};
   w(root, "repos.json", JSON.stringify(manifest));
   skill(root, "skills/one/a");
@@ -298,11 +298,11 @@ test("status: exit rules incl. expected absence for zero-skill entries", () => {
 test("status: stale, missing, dirty, not-a-repo, missing-clone all flagged", () => {
   const root = tmp();
   const manifest = { repos: [
-    { name: "stale", url: "u", description: "d", persona: "p" },
-    { name: "nofile", url: "u", description: "d", persona: "p" },
-    { name: "dirty", url: "u", description: "d", persona: "p" },
-    { name: "fake", url: "u", description: "d", persona: "p" },
-    { name: "gone", url: "u", description: "d", persona: "p" },
+    { name: "stale", url: "https://github.com/x/y", description: "d", persona: "p" },
+    { name: "nofile", url: "https://github.com/x/y", description: "d", persona: "p" },
+    { name: "dirty", url: "https://github.com/x/y", description: "d", persona: "p" },
+    { name: "fake", url: "https://github.com/x/y", description: "d", persona: "p" },
+    { name: "gone", url: "https://github.com/x/y", description: "d", persona: "p" },
   ]};
   w(root, "repos.json", JSON.stringify(manifest));
   for (const n of ["stale", "nofile", "dirty"]) { skill(root, `skills/${n}/a`); }
@@ -343,7 +343,7 @@ test("install: clones, generates, prunes, merges settings; clone failure flagged
     { name: "a", url: remote.url, description: "d", persona: "p" },
     { name: "b", url: "file://" + path.join(root, "nope.git"), description: "d", persona: "p" },
   ]}));
-  w(root, "agents/orphan.md", "drop me");
+  w(root, "agents/orphan.md", "---\nname: orphan\nskillPath: ../skills/orphan\n---\nx\n");
   const r = gen.runInstall(root, sp);
   eq(r.exitCode, 1);                                    // entry b failed
   eq(fs.existsSync(path.join(root, "skills/a/skills/one/SKILL.md")), true);
@@ -480,7 +480,7 @@ test("mergeSettings: symlinked existing entry is recognized as equivalent", () =
 test("loadManifest rejects pathExclude that is not an array of strings", () => {
   const root = tmp();
   w(root, "repos.json", JSON.stringify({ repos: [
-    { name: "a", url: "u", description: "d", persona: "p", pathExclude: "skills/x/**" }]}));
+    { name: "a", url: "https://github.com/x/y", description: "d", persona: "p", pathExclude: "skills/x/**" }]}));
   assert.throws(() => gen.loadManifest(root), /pathExclude must be an array/);
   clean(root);
 });
@@ -489,7 +489,7 @@ test("loadManifest rejects skillSource escaping the clone", () => {
   for (const bad of ["../other", "..", "/abs/skills"]) {
     const root = tmp();
     w(root, "repos.json", JSON.stringify({ repos: [
-      { name: "a", url: "u", description: "d", persona: "p", skillSource: bad }]}));
+      { name: "a", url: "https://github.com/x/y", description: "d", persona: "p", skillSource: bad }]}));
     assert.throws(() => gen.loadManifest(root), /skillSource/);
     clean(root);
   }
@@ -515,6 +515,85 @@ test("install: unparseable settings reports only the skipped line", () => {
   eq(r.exitCode, 0);
   eq(r.report.filter(l => l.startsWith("settings:")).length, 1);
   eq(/skipped/.test(r.report.find(l => l.startsWith("settings:"))), true);
+  clean(root);
+});
+
+test("loadManifest rejects injection-prone or unsupported urls", () => {
+  for (const bad of [
+    "--upload-pack=touch /tmp/x",
+    "ssh://git@github.com/o/r",
+    "/local/path",
+    "http://github.com/o/r",
+  ]) {
+    const root = tmp();
+    w(root, "repos.json", JSON.stringify({ repos: [
+      { name: "a", url: bad, description: "d", persona: "p" }]}));
+    assert.throws(() => gen.loadManifest(root), /url must be/i);
+    clean(root);
+  }
+});
+
+test("loadManifest accepts https GitHub and file:// mirror urls", () => {
+  const root = tmp();
+  w(root, "repos.json", JSON.stringify({ repos: [
+    { name: "a", url: "https://github.com/o/r", description: "d", persona: "p" },
+    { name: "b", url: "file:///tmp/mirror.git", description: "d", persona: "p" },
+  ]}));
+  eq(gen.loadManifest(root).repos.length, 2);
+  clean(root);
+});
+
+test("loadManifest rejects skillSource escaping via backslash (cross-platform)", () => {
+  const root = tmp();
+  w(root, "repos.json", JSON.stringify({ repos: [
+    { name: "a", url: "https://github.com/x/y", description: "d", persona: "p", skillSource: "..\\evil" }]}));
+  assert.throws(() => gen.loadManifest(root), /skillSource/);
+  clean(root);
+});
+
+test("update: changed manifest url re-clones from the new remote", () => {
+  const root = tmp(); const sp = path.join(root, "settings.json");
+  const ra = bareRemote(tmp()); ra.add(path.join("skills", "one"), "one");
+  const rb = bareRemote(tmp()); rb.add(path.join("skills", "two"), "two");
+  w(root, "repos.json", JSON.stringify({ repos: [
+    { name: "a", url: ra.url, description: "d", persona: "p" }]}));
+  eq(gen.runInstall(root, sp).exitCode, 0);
+  eq(fs.readFileSync(path.join(root, "agents/a.md"), "utf8"),
+     gen.renderAgentFile({ name: "a", description: "d", persona: "p" }, ["one"]));
+  w(root, "repos.json", JSON.stringify({ repos: [
+    { name: "a", url: rb.url, description: "d", persona: "p" }]}));
+  const r = gen.runUpdate(root, sp);
+  eq(r.exitCode, 0);
+  eq(r.report.some(l => /url changed/.test(l)), true);
+  eq(fs.readFileSync(path.join(root, "agents/a.md"), "utf8"),
+     gen.renderAgentFile({ name: "a", description: "d", persona: "p" }, ["two"]));
+  clean(root);
+});
+
+test("mergeSettings: .bak is replaced atomically, not written through a symlink", () => {
+  const root = tmp(); const sp = path.join(root, "settings.json");
+  w(root, "settings.json", JSON.stringify({ a: 1 }));
+  w(root, "victim.txt", "do not touch");
+  fs.symlinkSync(path.join(root, "victim.txt"), sp + ".bak");
+  const r = gen.mergeSettings(sp, root);
+  eq(r.changed, true);
+  eq(fs.readFileSync(path.join(root, "victim.txt"), "utf8"), "do not touch");
+  eq(fs.lstatSync(sp + ".bak").isSymbolicLink(), false);
+  eq(JSON.parse(fs.readFileSync(sp + ".bak", "utf8")).a, 1);
+  clean(root);
+});
+
+test("prune: only generated agent files are pruned, user files survive", () => {
+  const root = tmp();
+  w(root, "repos.json", JSON.stringify({ repos: [
+    { name: "one", url: "https://github.com/x/y", description: "d", persona: "p" }]}));
+  w(root, "agents/orphan.md", "---\nname: orphan\nskillPath: ../skills/orphan\n---\nx\n");
+  w(root, "agents/myown.md", "---\nname: myown\nskillPath: ~/.pi/other/agents\n---\ny\n");
+  w(root, "skills/orphan/junk.txt", "clone orphan");
+  const r = gen.prune(root, gen.loadManifest(root));
+  eq(r.agents.join(","), "orphan");
+  eq(fs.existsSync(path.join(root, "agents/myown.md")), true);
+  eq(fs.existsSync(path.join(root, "agents/orphan.md")), false);
   clean(root);
 });
 

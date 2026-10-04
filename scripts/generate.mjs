@@ -8,6 +8,7 @@ export const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url
 
 const NAME_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 const REQUIRED_FIELDS = ["url", "description", "persona"];
+const URL_RE = /^(https:\/\/[\w.-]+(?:\/[\w._~-]+)+\/?|file:\/\/\/[\w.~\/-]+)$/;
 
 export function loadManifest(root) {
   const file = path.join(root, "repos.json");
@@ -41,7 +42,7 @@ export function loadManifest(root) {
         throw new Error(`${entry.name}: skillSource must be a string`);
       }
       const src = path.normalize(entry.skillSource);
-      if (path.isAbsolute(src) || src === ".." || src.startsWith("../")) {
+      if (path.isAbsolute(src) || src.split(/[\\/]+/).includes("..")) {
         throw new Error(`${entry.name}: skillSource must be a relative path inside the clone`);
       }
     }
@@ -49,6 +50,9 @@ export function loadManifest(root) {
       throw new Error(`duplicate name: ${entry.name}`);
     }
     seen.add(entry.name);
+    if (!URL_RE.test(entry.url)) {
+      throw new Error(`${entry.name}: url must be an https GitHub URL or file:// mirror`);
+    }
   }
   return { repos: parsed.repos };
 }
@@ -172,8 +176,15 @@ export function prune(root, manifest) {
     for (const f of fs.readdirSync(agentsDir)) {
       const m = f.match(/^(.*)\.md$/);
       if (m && !names.has(m[1])) {
-        fs.rmSync(path.join(agentsDir, f));
-        agents.push(m[1]);
+        let generated = false;
+        try {
+          generated = fs.readFileSync(path.join(agentsDir, f), "utf8")
+            .includes(`skillPath: ../skills/${m[1]}`);
+        } catch { /* unreadable: leave it alone */ }
+        if (generated) {
+          fs.rmSync(path.join(agentsDir, f));
+          agents.push(m[1]);
+        }
       }
     }
   }
@@ -191,6 +202,12 @@ export function prune(root, manifest) {
 
 function expandTilde(p) {
   return p.startsWith("~/") ? path.join(os.homedir(), p.slice(2)) : p;
+}
+
+function atomicWrite(file, content) {
+  const tmpf = `${file}.tmp-${process.pid}`;
+  fs.writeFileSync(tmpf, content);
+  fs.renameSync(tmpf, file);
 }
 
 function realPath(p) {
@@ -224,7 +241,7 @@ export function mergeSettings(settingsPath, repoRoot) {
 
   if (!existed) {
     fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
-    fs.writeFileSync(settingsPath,
+    atomicWrite(settingsPath,
       JSON.stringify({ subagents: { agentScanDirs: [entry] } }, null, 2) + "\n");
     return { changed: true, entry };
   }
@@ -234,10 +251,10 @@ export function mergeSettings(settingsPath, repoRoot) {
   const already = list.some(d => realPath(expandTilde(d)) === realPath(resolved));
   if (already) return { changed: false, entry };
 
-  fs.copyFileSync(settingsPath, settingsPath + ".bak");
+  atomicWrite(settingsPath + ".bak", fs.readFileSync(settingsPath, "utf8"));
   const next = { ...existing,
     subagents: { ...existing?.subagents, agentScanDirs: [...list, entry] } };
-  fs.writeFileSync(settingsPath, JSON.stringify(next, null, 2) + "\n");
+  atomicWrite(settingsPath, JSON.stringify(next, null, 2) + "\n");
   return { changed: true, entry };
 }
 
@@ -324,13 +341,23 @@ function runFlow(root, settingsPath, mode) {
       state = "cloned";
     } else {
       if (mode === "update") {
-        const p = spawnSync("git", ["-C", cloneDir, "pull", "--ff-only"], { encoding: "utf8" });
-        if (p.status !== 0) {
-          report.push(`${entry.name}: pull failed (left as-is)`);
-          anyFailed = true;
+        const cur = spawnSync("git", ["-C", cloneDir, "remote", "get-url", "origin"], { encoding: "utf8" });
+        if (cur.status === 0 && cur.stdout.trim() !== entry.url) {
+          report.push(`${entry.name}: url changed, re-cloning`);
+          fs.rmSync(cloneDir, { recursive: true, force: true });
+          if (!doClone()) continue;
+          state = "cloned";
+        } else {
+          const p = spawnSync("git", ["-C", cloneDir, "pull", "--ff-only"], { encoding: "utf8" });
+          if (p.status !== 0) {
+            report.push(`${entry.name}: pull failed (left as-is)`);
+            anyFailed = true;
+          }
+          state = cloneState(cloneDir) === "dirty" ? "reused (dirty)" : "reused";
         }
+      } else {
+        state = cloneState(cloneDir) === "dirty" ? "reused (dirty)" : "reused";
       }
-      state = cloneState(cloneDir) === "dirty" ? "reused (dirty)" : "reused";
     }
     states.push({ entry, state });
   }
