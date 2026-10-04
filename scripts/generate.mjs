@@ -105,6 +105,65 @@ export function discoverSkills(cloneDir, entry) {
   return { skills, dropped, warnings };
 }
 
+export function renderAgentFile(entry, skillNames) {
+  const description = entry.description.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  return [
+    "---",
+    `name: ${entry.name}`,
+    `description: "${description}"`,
+    "inheritSkills: false",
+    `skills: ${skillNames.join(", ")}`,
+    `skillPath: ../skills/${entry.name}`,
+    "---",
+    entry.persona,
+    "",
+  ].join("\n");
+}
+
+export function writeAgentFiles(root, manifest) {
+  const agentsDir = path.join(root, "agents");
+  fs.mkdirSync(agentsDir, { recursive: true });
+  const written = [], removed = [], warnings = [];
+  for (const entry of manifest.repos) {
+    const found = discoverSkills(path.join(root, "skills", entry.name), entry);
+    warnings.push(...found.warnings);
+    const file = path.join(agentsDir, `${entry.name}.md`);
+    if (found.skills.length > 0) {
+      fs.writeFileSync(file, renderAgentFile(entry, found.skills.map(s => s.name)));
+      written.push(entry.name);
+    } else if (fs.existsSync(file)) {
+      fs.rmSync(file);
+      removed.push(entry.name);
+    }
+  }
+  return { written, removed, warnings };
+}
+
+export function prune(root, manifest) {
+  const agents = [], clones = [];
+  const names = new Set(manifest.repos.map(e => e.name));
+  const agentsDir = path.join(root, "agents");
+  if (fs.existsSync(agentsDir)) {
+    for (const f of fs.readdirSync(agentsDir)) {
+      const m = f.match(/^(.*)\.md$/);
+      if (m && !names.has(m[1])) {
+        fs.rmSync(path.join(agentsDir, f));
+        agents.push(m[1]);
+      }
+    }
+  }
+  const skillsDir = path.join(root, "skills");
+  if (fs.existsSync(skillsDir)) {
+    for (const d of fs.readdirSync(skillsDir, { withFileTypes: true })) {
+      if (d.isDirectory() && !names.has(d.name)) {
+        fs.rmSync(path.join(skillsDir, d.name), { recursive: true, force: true });
+        clones.push(d.name);
+      }
+    }
+  }
+  return { agents, clones };
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
   const cmd = process.argv[2];
   if (cmd === "install" || cmd === "update" || cmd === "status") {

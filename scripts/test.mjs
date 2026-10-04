@@ -167,6 +167,56 @@ test("discovery: corrupter names are skipped with a warning", () => {
   clean(root);
 });
 
+test("renderAgentFile: exact bytes, YAML-escaped description", () => {
+  const entry = { name: "ponytail", url: "u",
+    description: `Blunt: says "no"`,
+    persona: "You are Ponytail." };
+  eq(gen.renderAgentFile(entry, ["ponytail", "ponytail-review"]),
+`---
+name: ponytail
+description: "Blunt: says \\"no\\""
+inheritSkills: false
+skills: ponytail, ponytail-review
+skillPath: ../skills/ponytail
+---
+You are Ponytail.
+`);
+});
+
+test("writeAgentFiles: writes, idempotent, removes zero-skill leftovers", () => {
+  const root = tmp();
+  w(root, "repos.json", JSON.stringify({ repos: [
+    { name: "one", url: "u", description: "d", persona: "p" },
+    { name: "zero", url: "u", description: "d", persona: "p" },
+  ]}));
+  skill(root, "skills/one/a");
+  w(root, "agents/zero.md", "stale leftover");
+  let r = gen.writeAgentFiles(root, gen.loadManifest(root));
+  eq(r.written.join(","), "one");
+  eq(r.removed.join(","), "zero");
+  const first = fs.readFileSync(path.join(root, "agents/one.md"), "utf8");
+  gen.writeAgentFiles(root, gen.loadManifest(root));
+  eq(fs.readFileSync(path.join(root, "agents/one.md"), "utf8"), first);
+  eq(fs.existsSync(path.join(root, "agents/zero.md")), false);
+  clean(root);
+});
+
+test("prune: removes agents and clones not in the manifest", () => {
+  const root = tmp();
+  w(root, "repos.json", JSON.stringify({ repos: [
+    { name: "one", url: "u", description: "d", persona: "p" }]}));
+  w(root, "agents/one.md", "keep");
+  w(root, "agents/orphan.md", "drop");
+  w(root, "skills/one/keep.txt", "keep");
+  w(root, "skills/orphan/junk.txt", "drop");
+  const r = gen.prune(root, gen.loadManifest(root));
+  eq(r.agents.join(","), "orphan");
+  eq(r.clones.join(","), "orphan");
+  eq(fs.existsSync(path.join(root, "agents/one.md")), true);
+  eq(fs.existsSync(path.join(root, "skills/orphan")), false);
+  clean(root);
+});
+
 process.exitCode = await (async () => {
   let failed = 0;
   for (const t of tests) {
