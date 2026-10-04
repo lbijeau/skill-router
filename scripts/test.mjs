@@ -423,6 +423,24 @@ test("discovery: SKILL.md match is case-exact (portable to Linux)", () => {
   clean(root);
 });
 
+test("discovery: names outside the agentskills charset are skipped with a warning", () => {
+  const root = tmp();
+  skill(root, "skills/dash", "-bad");
+  skill(root, "skills/alias", "*alias");
+  skill(root, "skills/upper", "BadName");
+  skill(root, "skills/ok");
+  const r = gen.discoverSkills(root, E());
+  eq(r.skills.map(s => s.name).join(","), "ok");
+  eq(r.warnings.filter(x => /unexpressible/.test(x)).length, 3);
+  clean(root);
+});
+
+test("renderAgentFile: multi-line description is escaped into one YAML line", () => {
+  const entry = { name: "x", description: "line1\nline2", persona: "p" };
+  const out = gen.renderAgentFile(entry, ["a"]);
+  eq(out.split("\n")[2], 'description: "line1\\nline2"');
+});
+
 process.exitCode = await (async () => {
   let failed = 0;
   for (const t of tests) {

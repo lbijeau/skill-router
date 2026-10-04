@@ -89,7 +89,7 @@ export function discoverSkills(cloneDir, entry) {
       if (m) { name = m[1]; break; }
     }
     if (name === null || name === "") name = path.basename(dir);
-    if (/[,:"]/.test(name) || name.trim() !== name) {
+    if (!NAME_RE.test(name) || name.length > 64) {
       warnings.push(`unexpressible skill name: ${JSON.stringify(name)} in ${dir}`);
       continue;
     }
@@ -106,7 +106,10 @@ export function discoverSkills(cloneDir, entry) {
 }
 
 export function renderAgentFile(entry, skillNames) {
-  const description = entry.description.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  const description = entry.description
+    .replace(/\\/g, "\\\\")
+    .replace(/"/g, '\\"')
+    .replace(/\n/g, "\\n");
   return [
     "---",
     `name: ${entry.name}`,
