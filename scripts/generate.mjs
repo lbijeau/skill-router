@@ -201,9 +201,53 @@ export function mergeSettings(settingsPath, repoRoot) {
   return { changed: true, entry };
 }
 
+export function cloneState(cloneDir) {
+  if (!fs.existsSync(cloneDir)) return "missing";
+  if (!fs.existsSync(path.join(cloneDir, ".git"))) return "not-a-repo";
+  const st = spawnSync("git", ["-C", cloneDir, "status", "--porcelain"], { encoding: "utf8" });
+  if (st.status !== 0) return "not-a-repo";
+  return st.stdout.trim() === "" ? "ok" : "dirty";
+}
+
+export function statusOf(root, manifest) {
+  const rows = [];
+  for (const entry of manifest.repos) {
+    const cloneDir = path.join(root, "skills", entry.name);
+    const clone = cloneState(cloneDir);
+    const found = discoverSkills(cloneDir, entry);
+    const agentFile = path.join(root, "agents", `${entry.name}.md`);
+    let agent;
+    if (found.skills.length === 0) {
+      agent = fs.existsSync(agentFile) ? "stale" : "in-sync";
+    } else if (!fs.existsSync(agentFile)) {
+      agent = "missing";
+    } else {
+      const onDisk = fs.readFileSync(agentFile, "utf8");
+      const expected = renderAgentFile(entry, found.skills.map(s => s.name));
+      agent = onDisk === expected ? "in-sync" : "stale";
+    }
+    rows.push({ name: entry.name, clone, skills: found.skills.length, agent });
+  }
+  const ok = rows.every(r => r.clone === "ok" && r.agent === "in-sync");
+  return { rows, exitCode: ok ? 0 : 1 };
+}
+
+function printStatus(root, manifest) {
+  const { rows, exitCode } = statusOf(root, manifest);
+  console.log(["NAME", "CLONE", "SKILLS", "AGENT"].reduce((a, h, i) => a + h.padEnd([14, 10, 7, 10][i]), ""));
+  for (const r of rows) {
+    console.log(r.name.padEnd(14) + r.clone.padEnd(10) + String(r.skills).padEnd(7) + r.agent);
+  }
+  return exitCode;
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
   const cmd = process.argv[2];
-  if (cmd === "install" || cmd === "update" || cmd === "status") {
+  if (cmd === "status") {
+    try { process.exit(printStatus(REPO_ROOT, loadManifest(REPO_ROOT))); }
+    catch (e) { console.error(e.message); process.exit(1); }
+  }
+  if (cmd === "install" || cmd === "update") {
     console.error(`${cmd}: not implemented yet`); process.exit(1);
   }
   console.error("usage: generate.mjs <install|update|status>"); process.exit(1);

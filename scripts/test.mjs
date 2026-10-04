@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import assert from "node:assert";
+import { spawnSync } from "node:child_process";
 import * as gen from "./generate.mjs";
 
 const tests = [];
@@ -263,6 +264,62 @@ test("mergeSettings: unparseable file is never touched", () => {
   eq(/unparseable/.test(r.error), true);
   eq(fs.readFileSync(sp, "utf8"), before);
   eq(fs.existsSync(sp + ".bak"), false);
+  clean(root);
+});
+
+function gitRepo(dir) {
+  fs.mkdirSync(dir, { recursive: true });
+  const g = (...args) => spawnSync("git", ["-C", dir, ...args], { encoding: "utf8" });
+  g("init", "-q");
+  g("config", "user.name", "t"); g("config", "user.email", "t@t");
+  g("add", "-A");
+  g("commit", "--allow-empty", "-m", "init", "-q");
+}
+
+test("status: exit rules incl. expected absence for zero-skill entries", () => {
+  const root = tmp();
+  const manifest = { repos: [
+    { name: "one", url: "u", description: "d", persona: "p" },
+    { name: "zero", url: "u", description: "d", persona: "p" },
+  ]};
+  w(root, "repos.json", JSON.stringify(manifest));
+  skill(root, "skills/one/a");
+  gitRepo(path.join(root, "skills/one"));
+  w(root, "agents/one.md", gen.renderAgentFile(manifest.repos[0], ["a"]));
+  gitRepo(path.join(root, "skills/zero"));           // clone ok, no skills
+  const r = gen.statusOf(root, manifest);
+  eq(r.rows.length, 2);
+  eq(r.rows.find(x => x.name === "zero").agent, "in-sync");
+  eq(r.rows.find(x => x.name === "one").agent, "in-sync");
+  eq(r.exitCode, 0);
+  clean(root);
+});
+
+test("status: stale, missing, dirty, not-a-repo, missing-clone all flagged", () => {
+  const root = tmp();
+  const manifest = { repos: [
+    { name: "stale", url: "u", description: "d", persona: "p" },
+    { name: "nofile", url: "u", description: "d", persona: "p" },
+    { name: "dirty", url: "u", description: "d", persona: "p" },
+    { name: "fake", url: "u", description: "d", persona: "p" },
+    { name: "gone", url: "u", description: "d", persona: "p" },
+  ]};
+  w(root, "repos.json", JSON.stringify(manifest));
+  for (const n of ["stale", "nofile", "dirty"]) { skill(root, `skills/${n}/a`); }
+  gitRepo(path.join(root, "skills/stale"));
+  w(root, "agents/stale.md", "tampered");
+  gitRepo(path.join(root, "skills/nofile"));
+  gitRepo(path.join(root, "skills/dirty"));
+  w(root, "skills/dirty/untracked.txt", "x");
+  w(root, "skills/fake/junk.txt", "x");           // dir, no .git
+  const r = gen.statusOf(root, manifest);
+  const by = n => r.rows.find(x => x.name === n);
+  eq(by("stale").agent, "stale"); eq(by("stale").clone, "ok");
+  eq(by("nofile").agent, "missing");
+  eq(by("dirty").clone, "dirty");
+  eq(by("fake").clone, "not-a-repo");
+  eq(by("gone").clone, "missing");
+  eq(r.exitCode, 1);
   clean(root);
 });
 
