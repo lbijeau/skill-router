@@ -1,7 +1,7 @@
 # Skill Router — Design
 
 Date: 2026-07-09
-Status: proposed
+Status: approved — implementation plan: docs/superpowers/plans/2026-10-03-skill-router.md
 
 ## Purpose
 
@@ -165,7 +165,7 @@ Read-only table per entry: clone state (`ok` / `missing` / `not-a-repo` /
 
 Expected absence: an entry with zero discoverable skills has no agent file
 by design. Its agent state is `in-sync` when no `agents/<name>.md` exists,
-and `stale` when one does (a leftover that prune removes). A zero-skill
+and `stale` when one does (a leftover that regeneration removes). A zero-skill
 entry therefore never forces a non-zero exit on its own.
 
 ### Skill discovery
@@ -217,7 +217,7 @@ Your skills encode how you work.
 | Condition | Behavior |
 |---|---|
 | Clone fails (network, 404) | Warn, skip entry, continue; exit non-zero at end |
-| Zero `SKILL.md` in a valid clone | Warn, skip agent generation; manifest entry kept so `update` retries |
+| Zero `SKILL.md` in a valid clone | Warn, skip agent generation, remove any leftover `agents/<name>.md`; manifest entry kept so `update` retries |
 | `skills/<name>` exists, not a git repo | Remove and re-clone |
 | `git pull --ff-only` fails on update | Warn for that entry, leave clone as-is, regenerate from current state |
 | Malformed frontmatter in a discovered `SKILL.md` | Skip that one skill with a warning; keep the rest |
