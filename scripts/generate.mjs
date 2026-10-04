@@ -123,10 +123,11 @@ export function renderAgentFile(entry, skillNames) {
 export function writeAgentFiles(root, manifest) {
   const agentsDir = path.join(root, "agents");
   fs.mkdirSync(agentsDir, { recursive: true });
-  const written = [], removed = [], warnings = [];
+  const written = [], removed = [], warnings = [], dropped = [];
   for (const entry of manifest.repos) {
     const found = discoverSkills(path.join(root, "skills", entry.name), entry);
     warnings.push(...found.warnings);
+    dropped.push(...found.dropped);
     const file = path.join(agentsDir, `${entry.name}.md`);
     if (found.skills.length > 0) {
       fs.writeFileSync(file, renderAgentFile(entry, found.skills.map(s => s.name)));
@@ -136,7 +137,7 @@ export function writeAgentFiles(root, manifest) {
       removed.push(entry.name);
     }
   }
-  return { written, removed, warnings };
+  return { written, removed, warnings, dropped };
 }
 
 export function prune(root, manifest) {
@@ -211,10 +212,13 @@ export function cloneState(cloneDir) {
 
 export function statusOf(root, manifest) {
   const rows = [];
+  const dropped = [];
   for (const entry of manifest.repos) {
     const cloneDir = path.join(root, "skills", entry.name);
     const clone = cloneState(cloneDir);
     const found = discoverSkills(cloneDir, entry);
+    dropped.push(...found.dropped.map(d =>
+      `${d.name}: kept ${d.keptDir}, dropped ${d.droppedDir}`));
     const agentFile = path.join(root, "agents", `${entry.name}.md`);
     let agent;
     if (found.skills.length === 0) {
@@ -229,26 +233,120 @@ export function statusOf(root, manifest) {
     rows.push({ name: entry.name, clone, skills: found.skills.length, agent });
   }
   const ok = rows.every(r => r.clone === "ok" && r.agent === "in-sync");
-  return { rows, exitCode: ok ? 0 : 1 };
+  return { rows, dropped, exitCode: ok ? 0 : 1 };
 }
 
 function printStatus(root, manifest) {
-  const { rows, exitCode } = statusOf(root, manifest);
+  const { rows, dropped, exitCode } = statusOf(root, manifest);
   console.log(["NAME", "CLONE", "SKILLS", "AGENT"].reduce((a, h, i) => a + h.padEnd([14, 10, 7, 10][i]), ""));
   for (const r of rows) {
     console.log(r.name.padEnd(14) + r.clone.padEnd(10) + String(r.skills).padEnd(7) + r.agent);
   }
+  for (const d of dropped) console.log(d);
   return exitCode;
+}
+
+function runFlow(root, settingsPath, mode) {
+  const manifest = loadManifest(root);
+  const report = [];
+  let anyFailed = false;
+  const oldSkillSets = new Map();
+  if (mode === "update") {
+    for (const entry of manifest.repos) {
+      const f = path.join(root, "agents", `${entry.name}.md`);
+      if (fs.existsSync(f)) {
+        const m = fs.readFileSync(f, "utf8").match(/^skills:[ \t]*(.*)$/m);
+        if (m) oldSkillSets.set(entry.name, new Set(m[1].split(", ").filter(Boolean)));
+      }
+    }
+  }
+  const states = [];
+  for (const entry of manifest.repos) {
+    const cloneDir = path.join(root, "skills", entry.name);
+    const doClone = () => {
+      const r = spawnSync("git", ["clone", "--depth", "1", entry.url, cloneDir], { encoding: "utf8" });
+      if (r.status !== 0) {
+        const last = (r.stderr || "git clone failed").trim().split("\n").pop();
+        report.push(`${entry.name}: clone failed (${last})`);
+        anyFailed = true;
+        return false;
+      }
+      return true;
+    };
+    let state;
+    if (!fs.existsSync(cloneDir)) {
+      if (!doClone()) continue;
+      state = "cloned";
+    } else if (!fs.existsSync(path.join(cloneDir, ".git"))) {
+      fs.rmSync(cloneDir, { recursive: true, force: true });
+      if (!doClone()) continue;
+      state = "cloned";
+    } else {
+      if (mode === "update") {
+        const p = spawnSync("git", ["-C", cloneDir, "pull", "--ff-only"], { encoding: "utf8" });
+        if (p.status !== 0) {
+          report.push(`${entry.name}: pull failed (left as-is)`);
+          anyFailed = true;
+        }
+      }
+      state = cloneState(cloneDir) === "dirty" ? "reused (dirty)" : "reused";
+    }
+    states.push({ entry, state });
+  }
+  const genResult = writeAgentFiles(root, manifest);
+  for (const warn of genResult.warnings) report.push(warn);
+  for (const d of genResult.dropped) {
+    report.push(`${d.name}: kept ${d.keptDir}, dropped ${d.droppedDir}`);
+  }
+  for (const { entry, state } of states) {
+    const found = discoverSkills(path.join(root, "skills", entry.name), entry);
+    const names = found.skills.map(s => s.name);
+    report.push(`${entry.name}: ${state}, ${found.skills.length} skills, ` +
+      (found.skills.length ? "agent written" : "no agent"));
+    if (mode === "update") {
+      const old = oldSkillSets.get(entry.name) ?? new Set();
+      const added = names.filter(n => !old.has(n));
+      const gone = [...old].filter(n => !names.includes(n));
+      if (added.length || gone.length) {
+        const parts = [];
+        if (added.length) parts.push(`+${added.length} (${added.join(", ")})`);
+        if (gone.length) parts.push(`-${gone.length} (${gone.join(", ")})`);
+        report.push(`${entry.name}: ${parts.join(", ")}`);
+      }
+    }
+  }
+  const pruned = prune(root, manifest);
+  for (const a of pruned.agents) report.push(`pruned ${a} (agent)`);
+  for (const c of pruned.clones) report.push(`pruned ${c} (clone)`);
+  const settings = mergeSettings(settingsPath, root);
+  report.push(settings.changed
+    ? `settings: added ${settings.entry}`
+    : `settings: already configured (${settings.entry})`);
+  if (settings.error) report.push(`settings: skipped (${settings.error})`);
+  return { exitCode: anyFailed ? 1 : 0, report };
+}
+
+const DEFAULT_SETTINGS = () => path.join(os.homedir(), ".pi/agent/settings.json");
+export function runInstall(root, settingsPath) {
+  return runFlow(root, settingsPath ?? DEFAULT_SETTINGS(), "install");
+}
+export function runUpdate(root, settingsPath) {
+  return runFlow(root, settingsPath ?? DEFAULT_SETTINGS(), "update");
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
   const cmd = process.argv[2];
-  if (cmd === "status") {
-    try { process.exit(printStatus(REPO_ROOT, loadManifest(REPO_ROOT))); }
-    catch (e) { console.error(e.message); process.exit(1); }
-  }
-  if (cmd === "install" || cmd === "update") {
-    console.error(`${cmd}: not implemented yet`); process.exit(1);
-  }
+  try {
+    if (cmd === "status") {
+      process.exit(printStatus(REPO_ROOT, loadManifest(REPO_ROOT)));
+    }
+    if (cmd === "install" || cmd === "update") {
+      const r = cmd === "install"
+        ? runInstall(REPO_ROOT)
+        : runUpdate(REPO_ROOT);
+      for (const line of r.report) console.log(line);
+      process.exit(r.exitCode);
+    }
+  } catch (e) { console.error(e.message); process.exit(1); }
   console.error("usage: generate.mjs <install|update|status>"); process.exit(1);
 }

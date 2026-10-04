@@ -323,6 +323,96 @@ test("status: stale, missing, dirty, not-a-repo, missing-clone all flagged", () 
   clean(root);
 });
 
+function bareRemote(root) {
+  const url = "file://" + path.join(root, "remote.git");
+  spawnSync("git", ["init", "-q", "--bare", path.join(root, "remote.git")]);
+  const work = path.join(root, "work");
+  spawnSync("git", ["clone", "-q", url, work]);
+  const g = (...a) => spawnSync("git", ["-C", work, ...a], { encoding: "utf8" });
+  g("config", "user.name", "t"); g("config", "user.email", "t@t");
+  return { url, add(rel, name) {
+    skill(work, rel, name);
+    g("add", "-A"); g("commit", "-q", "-m", "add"); g("push", "-q", "origin", "HEAD");
+  } };
+}
+
+test("install: clones, generates, prunes, merges settings; clone failure flagged", () => {
+  const root = tmp(); const sp = path.join(root, "settings.json");
+  const remote = bareRemote(root); remote.add(path.join("skills", "one"), "one");
+  w(root, "repos.json", JSON.stringify({ repos: [
+    { name: "a", url: remote.url, description: "d", persona: "p" },
+    { name: "b", url: "file://" + path.join(root, "nope.git"), description: "d", persona: "p" },
+  ]}));
+  w(root, "agents/orphan.md", "drop me");
+  const r = gen.runInstall(root, sp);
+  eq(r.exitCode, 1);                                    // entry b failed
+  eq(fs.existsSync(path.join(root, "skills/a/skills/one/SKILL.md")), true);
+  eq(fs.readFileSync(path.join(root, "agents/a.md"), "utf8"),
+     gen.renderAgentFile({ name: "a", description: "d", persona: "p" }, ["one"]));
+  eq(fs.existsSync(path.join(root, "agents/orphan.md")), false);
+  eq(JSON.parse(fs.readFileSync(sp, "utf8")).subagents.agentScanDirs[0],
+     path.join(root, "agents"));
+  eq(r.report.some(l => /clone failed/.test(l)), true);
+  clean(root);
+});
+
+test("install: not-a-repo clone dir is removed and re-cloned", () => {
+  const root = tmp(); const remote = bareRemote(root);
+  remote.add(path.join("skills", "one"), "one");
+  w(root, "skills/a/junk.txt", "interrupted clone");
+  w(root, "repos.json", JSON.stringify({ repos: [
+    { name: "a", url: remote.url, description: "d", persona: "p" }]}));
+  const r = gen.runInstall(root, path.join(root, "settings.json"));
+  eq(r.exitCode, 0);
+  eq(fs.existsSync(path.join(root, "skills/a/.git")), true);
+  eq(fs.existsSync(path.join(root, "skills/a/junk.txt")), false);
+  clean(root);
+});
+
+test("update: pull --ff-only picks up new skills and reports deltas", () => {
+  const root = tmp(); const sp = path.join(root, "settings.json");
+  const remote = bareRemote(root); remote.add(path.join("skills", "one"), "one");
+  w(root, "repos.json", JSON.stringify({ repos: [
+    { name: "a", url: remote.url, description: "d", persona: "p" }]}));
+  eq(gen.runInstall(root, sp).exitCode, 0);
+  remote.add(path.join("skills", "two"), "two");
+  const r = gen.runUpdate(root, sp);
+  eq(r.exitCode, 0);
+  eq(r.report.some(l => /a: \+1 \(two\)/.test(l)), true);
+  eq(fs.readFileSync(path.join(root, "agents/a.md"), "utf8"),
+     gen.renderAgentFile({ name: "a", description: "d", persona: "p" }, ["one", "two"]));
+  clean(root);
+});
+
+test("update: non-ff remote is warned and left as-is, exit non-zero", () => {
+  const root = tmp(); const sp = path.join(root, "settings.json");
+  const remote = bareRemote(root); remote.add(path.join("skills", "one"), "one");
+  w(root, "repos.json", JSON.stringify({ repos: [
+    { name: "a", url: remote.url, description: "d", persona: "p" }]}));
+  eq(gen.runInstall(root, sp).exitCode, 0);
+  // rewrite remote history: amend + force push makes local pull non-ff
+  spawnSync("git", ["-C", path.join(root, "work"), "commit", "--amend", "-q", "-m", "rewritten"]);
+  spawnSync("git", ["-C", path.join(root, "work"), "push", "-q", "-f", "origin", "HEAD"]);
+  const r = gen.runUpdate(root, sp);
+  eq(r.exitCode, 1);
+  eq(r.report.some(l => /pull failed/.test(l)), true);
+  eq(fs.existsSync(path.join(root, "skills/a/.git")), true);   // clone untouched
+  clean(root);
+});
+
+test("install: reused clone reported dirty when locally modified", () => {
+  const root = tmp(); const remote = bareRemote(root);
+  remote.add(path.join("skills", "one"), "one");
+  w(root, "repos.json", JSON.stringify({ repos: [
+    { name: "a", url: remote.url, description: "d", persona: "p" }]}));
+  gen.runInstall(root, path.join(root, "settings.json"));
+  w(root, "skills/a/local-change.txt", "x");
+  const r = gen.runInstall(root, path.join(root, "settings.json"));
+  eq(r.report.some(l => /reused \(dirty\)/.test(l)), true);
+  eq(r.exitCode, 0);
+  clean(root);
+});
+
 process.exitCode = await (async () => {
   let failed = 0;
   for (const t of tests) {
