@@ -475,7 +475,7 @@ test("install: clones, generates, prunes, merges settings; clone failure flagged
     { name: "b", url: "file://" + path.join(root, "nope.git"), description: "d", persona: "p" },
   ]}));
   w(root, "agents/orphan.md", "---\nname: orphan\nskillPath: ../skills/orphan\n---\nx\n");
-  const r = gen.runInstall(root, sp);
+  const r = gen.runInstall(root, sp, path.join(root, "config.toml"));
   eq(r.exitCode, 1);                                    // entry b failed
   eq(fs.existsSync(path.join(root, "skills/a/skills/one/SKILL.md")), true);
   eq(fs.readFileSync(path.join(root, "agents/a.md"), "utf8"),
@@ -493,7 +493,7 @@ test("install: not-a-repo clone dir is removed and re-cloned", () => {
   w(root, "skills/a/junk.txt", "interrupted clone");
   w(root, "repos.json", JSON.stringify({ repos: [
     { name: "a", url: remote.url, description: "d", persona: "p" }]}));
-  const r = gen.runInstall(root, path.join(root, "settings.json"));
+  const r = gen.runInstall(root, path.join(root, "settings.json"), path.join(root, "config.toml"));
   eq(r.exitCode, 0);
   eq(fs.existsSync(path.join(root, "skills/a/.git")), true);
   eq(fs.existsSync(path.join(root, "skills/a/junk.txt")), false);
@@ -502,14 +502,15 @@ test("install: not-a-repo clone dir is removed and re-cloned", () => {
 
 test("update: pull --ff-only picks up new skills and reports deltas", () => {
   const root = tmp(); const sp = path.join(root, "settings.json");
+  const vp = path.join(root, "config.toml");
   const remote = bareRemote(root); remote.add(path.join("skills", "one"), "one");
   w(root, "repos.json", JSON.stringify({ repos: [
     { name: "a", url: remote.url, description: "d", persona: "p" }]}));
-  eq(gen.runInstall(root, sp).exitCode, 0);
+  eq(gen.runInstall(root, sp, vp).exitCode, 0);
   remote.add(path.join("skills", "two"), "two");
-  const r = gen.runUpdate(root, sp);
+  const r = gen.runUpdate(root, sp, vp);
   eq(r.exitCode, 0);
-  eq(r.report.some(l => /a: \+1 \(two\)/.test(l)), true);
+  eq(r.report.filter(l => /a: \+1 \(two\)/.test(l)).length, 1);
   eq(fs.readFileSync(path.join(root, "agents/a.md"), "utf8"),
      gen.renderAgentFile({ name: "a", description: "d", persona: "p" }, ["one", "two"]));
   clean(root);
@@ -520,11 +521,11 @@ test("update: non-ff remote is warned and left as-is, exit non-zero", () => {
   const remote = bareRemote(root); remote.add(path.join("skills", "one"), "one");
   w(root, "repos.json", JSON.stringify({ repos: [
     { name: "a", url: remote.url, description: "d", persona: "p" }]}));
-  eq(gen.runInstall(root, sp).exitCode, 0);
+  eq(gen.runInstall(root, sp, path.join(root, "config.toml")).exitCode, 0);
   // rewrite remote history: amend + force push makes local pull non-ff
   spawnSync("git", ["-C", path.join(root, "work"), "commit", "--amend", "-q", "-m", "rewritten"]);
   spawnSync("git", ["-C", path.join(root, "work"), "push", "-q", "-f", "origin", "HEAD"]);
-  const r = gen.runUpdate(root, sp);
+  const r = gen.runUpdate(root, sp, path.join(root, "config.toml"));
   eq(r.exitCode, 1);
   eq(r.report.some(l => /pull failed/.test(l)), true);
   eq(fs.existsSync(path.join(root, "skills/a/.git")), true);   // clone untouched
@@ -536,9 +537,9 @@ test("install: reused clone reported dirty when locally modified", () => {
   remote.add(path.join("skills", "one"), "one");
   w(root, "repos.json", JSON.stringify({ repos: [
     { name: "a", url: remote.url, description: "d", persona: "p" }]}));
-  gen.runInstall(root, path.join(root, "settings.json"));
+  gen.runInstall(root, path.join(root, "settings.json"), path.join(root, "config.toml"));
   w(root, "skills/a/local-change.txt", "x");
-  const r = gen.runInstall(root, path.join(root, "settings.json"));
+  const r = gen.runInstall(root, path.join(root, "settings.json"), path.join(root, "config.toml"));
   eq(r.report.some(l => /reused \(dirty\)/.test(l)), true);
   eq(r.exitCode, 0);
   clean(root);
@@ -622,9 +623,74 @@ test("install: clone failure leaves pre-existing agent file untouched", () => {
     { name: "b", url: "file://" + path.join(root, "nope.git"), description: "d", persona: "p" },
   ]}));
   w(root, "agents/b.md", "previously generated agent");
-  const r = gen.runInstall(root, sp);
+  const r = gen.runInstall(root, sp, path.join(root, "config.toml"));
   eq(r.exitCode, 1);
   eq(fs.readFileSync(path.join(root, "agents/b.md"), "utf8"), "previously generated agent");
+  clean(root);
+});
+
+test("install: writes both targets, wires both settings", () => {
+  const root = tmp(); const sp = path.join(root, "settings.json");
+  const vp = path.join(root, "config.toml");
+  const remote = bareRemote(root); remote.add(path.join("skills", "one"), "one");
+  w(root, "repos.json", JSON.stringify({ repos: [
+    { name: "a", url: remote.url, description: "d", persona: "p" },
+    { name: "b", url: "file://" + path.join(root, "nope.git"), description: "d", persona: "p" },
+  ]}));
+  const r = gen.runInstall(root, sp, vp);
+  eq(r.exitCode, 1);                                    // entry b failed
+  const found = gen.discoverSkills(path.join(root, "skills/a"), { name: "a", description: "d", persona: "p" });
+  eq(fs.readFileSync(path.join(root, "agents-vibe/a.toml"), "utf8"),
+    gen.renderVibeAgentTOML({ name: "a", description: "d", persona: "p" }, found.skills));
+  const cfg = fs.readFileSync(vp, "utf8");
+  eq(cfg.includes(`agent_paths = ["${path.join(root, "agents-vibe")}"]`), true);
+  eq(cfg.includes(`allowlist = ["${path.join(root, "skills")}/**"]`), true);
+  eq(JSON.parse(fs.readFileSync(sp, "utf8")).subagents.agentScanDirs[0], path.join(root, "agents"));
+  clean(root);
+});
+
+test("install: clone failure leaves pre-existing vibe TOML untouched", () => {
+  const root = tmp(); const sp = path.join(root, "settings.json");
+  const remote = bareRemote(root); remote.add(path.join("skills", "one"), "one");
+  w(root, "repos.json", JSON.stringify({ repos: [
+    { name: "a", url: remote.url, description: "d", persona: "p" },
+    { name: "b", url: "file://" + path.join(root, "nope.git"), description: "d", persona: "p" },
+  ]}));
+  w(root, "agents-vibe/b.toml", "pre-existing");
+  const r = gen.runInstall(root, sp, path.join(root, "config.toml"));
+  eq(r.exitCode, 1);
+  eq(fs.readFileSync(path.join(root, "agents-vibe/b.toml"), "utf8"), "pre-existing");
+  clean(root);
+});
+
+test("install: vibe config bail is report-only", () => {
+  const root = tmp(); const sp = path.join(root, "settings.json");
+  const vp = path.join(root, "config.toml");
+  const remote = bareRemote(root); remote.add(path.join("skills", "one"), "one");
+  w(root, "repos.json", JSON.stringify({ repos: [
+    { name: "a", url: remote.url, description: "d", persona: "p" }]}));
+  w(root, "config.toml", 'agent_paths = [\n  "/other",\n]\n');
+  const r = gen.runInstall(root, sp, vp);
+  eq(r.exitCode, 0);
+  const skipped = r.report.filter(l => /vibe config: agent_paths skipped/.test(l));
+  eq(skipped.length, 1);
+  eq(/add "/.test(skipped[0]), true);
+  clean(root);
+});
+
+test("install: report mentions both targets and prints reminders", () => {
+  const root = tmp(); const sp = path.join(root, "settings.json");
+  const vp = path.join(root, "config.toml");
+  const remote = bareRemote(root); remote.add(path.join("skills", "one"), "one");
+  w(root, "repos.json", JSON.stringify({ repos: [
+    { name: "a", url: remote.url, description: "d", persona: "p" }]}));
+  const r = gen.runInstall(root, sp, vp);
+  eq(r.exitCode, 0);
+  eq(r.report.some(l => /a: cloned, 1 skills, agent written \(pi, vibe\)/.test(l)), true);
+  eq(r.report.some(l => /vibe config: agent_paths added/.test(l)), true);
+  eq(r.report.some(l => /vibe config: allowlist added/.test(l)), true);
+  eq(r.report.includes("reminder: run /reload (or restart Vibe) to pick up new agents"), true);
+  eq(r.report.includes("reminder: enabled_agents / disabled_agents config filters override agent discovery"), true);
   clean(root);
 });
 
@@ -684,7 +750,7 @@ test("install: unparseable settings reports only the skipped line", () => {
   w(root, "repos.json", JSON.stringify({ repos: [
     { name: "a", url: remote.url, description: "d", persona: "p" }]}));
   w(root, "settings.json", "{ not json");
-  const r = gen.runInstall(root, sp);
+  const r = gen.runInstall(root, sp, path.join(root, "config.toml"));
   eq(r.exitCode, 0);
   eq(r.report.filter(l => l.startsWith("settings:")).length, 1);
   eq(/skipped/.test(r.report.find(l => l.startsWith("settings:"))), true);
@@ -730,12 +796,12 @@ test("update: changed manifest url re-clones from the new remote", () => {
   const rb = bareRemote(tmp()); rb.add(path.join("skills", "two"), "two");
   w(root, "repos.json", JSON.stringify({ repos: [
     { name: "a", url: ra.url, description: "d", persona: "p" }]}));
-  eq(gen.runInstall(root, sp).exitCode, 0);
+  eq(gen.runInstall(root, sp, path.join(root, "config.toml")).exitCode, 0);
   eq(fs.readFileSync(path.join(root, "agents/a.md"), "utf8"),
      gen.renderAgentFile({ name: "a", description: "d", persona: "p" }, ["one"]));
   w(root, "repos.json", JSON.stringify({ repos: [
     { name: "a", url: rb.url, description: "d", persona: "p" }]}));
-  const r = gen.runUpdate(root, sp);
+  const r = gen.runUpdate(root, sp, path.join(root, "config.toml"));
   eq(r.exitCode, 0);
   eq(r.report.some(l => /url changed/.test(l)), true);
   eq(fs.readFileSync(path.join(root, "agents/a.md"), "utf8"),

@@ -636,7 +636,7 @@ function printStatus(root, manifest) {
   return exitCode;
 }
 
-function runFlow(root, settingsPath, mode) {
+function runFlow(root, settingsPath, vibeConfigPath, mode) {
   const manifest = loadManifest(root);
   const report = [];
   let anyFailed = false;
@@ -703,11 +703,20 @@ function runFlow(root, settingsPath, mode) {
   for (const name of genResult.removed) {
     report.push(`${name}: 0 skills, removed stale agent`);
   }
+  const vibeResult = writeVibeAgentFiles(root, manifest, failed);
+  for (const name of vibeResult.removed) {
+    report.push(`${name}: 0 skills, removed stale vibe agent`);
+  }
+  const piWritten = new Set(genResult.written);
+  const vibeWritten = new Set(vibeResult.written);
   for (const { entry, state } of states) {
     const found = discoverSkills(path.join(root, "skills", entry.name), entry);
     const names = found.skills.map(s => s.name);
+    const targets = [];
+    if (piWritten.has(entry.name)) targets.push("pi");
+    if (vibeWritten.has(entry.name)) targets.push("vibe");
     report.push(`${entry.name}: ${state}, ${found.skills.length} skills, ` +
-      (found.skills.length ? "agent written" : "no agent"));
+      (found.skills.length ? `agent written (${targets.join(", ")})` : "no agent"));
     if (mode === "update") {
       const old = oldSkillSets.get(entry.name) ?? new Set();
       const added = names.filter(n => !old.has(n));
@@ -722,6 +731,7 @@ function runFlow(root, settingsPath, mode) {
   }
   const pruned = prune(root, manifest);
   for (const a of pruned.agents) report.push(`pruned ${a} (agent)`);
+  for (const v of pruned.vibeAgents) report.push(`pruned ${v} (vibe agent)`);
   for (const c of pruned.clones) report.push(`pruned ${c} (clone)`);
   const settings = mergeSettings(settingsPath, root);
   if (settings.error) {
@@ -731,15 +741,31 @@ function runFlow(root, settingsPath, mode) {
       ? `settings: added ${settings.entry}`
       : `settings: already configured (${settings.entry})`);
   }
+  if (vibeConfigPath) {
+    const vc = mergeVibeConfig(vibeConfigPath, root);
+    report.push(vc.agentPaths.error
+      ? `vibe config: agent_paths skipped (${vc.agentPaths.error})`
+      : vc.agentPaths.changed
+        ? `vibe config: agent_paths added ${path.join(root, "agents-vibe")}`
+        : "vibe config: agent_paths already configured");
+    report.push(vc.allowlist.error
+      ? `vibe config: allowlist skipped (${vc.allowlist.error})`
+      : vc.allowlist.changed
+        ? `vibe config: allowlist added ${path.join(root, "skills")}/**`
+        : "vibe config: allowlist already configured");
+  }
+  report.push("reminder: run /reload (or restart Vibe) to pick up new agents");
+  report.push("reminder: enabled_agents / disabled_agents config filters override agent discovery");
   return { exitCode: anyFailed ? 1 : 0, report };
 }
 
 const DEFAULT_SETTINGS = () => path.join(os.homedir(), ".pi/agent/settings.json");
-export function runInstall(root, settingsPath) {
-  return runFlow(root, settingsPath ?? DEFAULT_SETTINGS(), "install");
+const DEFAULT_VIBE_CONFIG = () => path.join(process.env.VIBE_HOME || path.join(os.homedir(), ".vibe"), "config.toml");
+export function runInstall(root, settingsPath, vibeConfigPath) {
+  return runFlow(root, settingsPath ?? DEFAULT_SETTINGS(), vibeConfigPath ?? DEFAULT_VIBE_CONFIG(), "install");
 }
-export function runUpdate(root, settingsPath) {
-  return runFlow(root, settingsPath ?? DEFAULT_SETTINGS(), "update");
+export function runUpdate(root, settingsPath, vibeConfigPath) {
+  return runFlow(root, settingsPath ?? DEFAULT_SETTINGS(), vibeConfigPath ?? DEFAULT_VIBE_CONFIG(), "update");
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
