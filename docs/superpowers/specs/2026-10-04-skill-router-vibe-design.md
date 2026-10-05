@@ -529,3 +529,16 @@ disabled tool route, the instruction table, and the narrowly-scoped
 allowlist; widening the allowlist to the user's own trees would break
 it. Denials do not redirect immediately — the mattpocock child retried
 the denied path once before falling back.
+
+**Follow-up experiment — session bash grants survive `/clear`:** after
+`/clear` (fresh conversation, 0 tokens), the same Vibe *process* ran
+`sed -n '1,2p'` on the very file the read_file wall had denied twice
+during the experiments — with no permission prompt; the content flowed.
+"Allow for remainder of this session" binds to the Vibe session
+(process), not the conversation: `/clear` resets context, not the
+permission surface. Consequently the clean-room's allowlist wall only
+binds the file tools; session-approved bash command patterns (e.g.
+`sed *`, `cd *`) can read any file for the life of the process, across
+conversations. Mitigations: end the session (grants die with the
+process), avoid "Always allow" (config-persistent), and treat bash
+pattern grants during subagent work as full-file-read grants.
