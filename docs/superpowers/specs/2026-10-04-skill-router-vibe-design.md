@@ -505,3 +505,27 @@ top-level-only TOML scan grammar with multi-line-string refusal,
 marker-based prune, the zero-skill status rule, absolute paths
 everywhere (entries and skill rows), boilerplate rewording, the
 chained-skill rule, and the expanded failure/test/assumption tables.
+
+## Experiments (2026-10-04, live via Herdr pane driving)
+
+Three subagent experiments against live sessions, extending the
+validation results with behavioral findings:
+
+| Experiment | Probes | Result |
+|---|---|---|
+| ponytail audit (skill-router cwd) | persona fidelity, file route | Read exactly one skill (`ponytail-audit`) before scanning, skipped unneeded siblings; blunt, quantified output in character |
+| superpowers feature flow (planetron cwd) | chained-skill rule, bleed fallback | Followed `using-superpowers` → `brainstorming` chain via the file route; brainstorming discipline followed (context first, clarifying questions before design) |
+| mattpocock test-first (planetron cwd) | deep-path allowlist (5 levels), companion files | Read `tdd/SKILL.md` + `tests.md` + `mocking.md` from the clone; zero prompts on 5-level-deep reads |
+
+**Sharpened finding — advertisement bleed is behavioral, not cosmetic:**
+both planetron-cwd children *first attempted* the advertised skill paths
+in the user's own `skill_paths` tree (`~/repositories/superpowers/...`)
+for well-known skill names, before consulting their instruction table.
+The permission wall — only the clone tree is allowlisted — is the
+backstop that forces the clean-room: attempts on the user's tree
+surface an approval prompt, a deny sends the child back to its table.
+The clean-room therefore holds through the *interaction* of the
+disabled tool route, the instruction table, and the narrowly-scoped
+allowlist; widening the allowlist to the user's own trees would break
+it. Denials do not redirect immediately — the mattpocock child retried
+the denied path once before falling back.
