@@ -434,12 +434,19 @@ manual remedy + no write + no `.bak`) held against the real config; all
 generated TOMLs are strict-parser-valid; the folded-description pipeline
 renders the ponytail flagship artifact as designed.
 
-**Open decision (assumption 3):** on the unified harness, subagent skill
-reads surface a per-read approval prompt in the parent. Options: accept
-the prompts (each skill activation needs one Allow), find the config key
-that governs the namespaced `file_system.read_file` tool, or launch with
-`--add-dir` to pre-trust the clone tree. Until one lands, the allowlist
-duty is harmless but inert on the unified harness.
+**Open decision (assumption 3) — RESOLVED by spike (2026-10-04).** The
+mechanism was right; the pattern shape was wrong. `path_pattern_matches`
+routes absolute patterns through `PurePosixPath.match` (Python 3.12),
+where `**` is not recursive and patterns are component-count-strict —
+so the generated `skills/**` entry matches nothing below `skills/`.
+Replacing it with a set of depth patterns (`skills/*` … `skills/*`×8)
+made subagent clone reads auto-approve with no prompt (verified live:
+a fresh 4-level-deep file read with zero approval UI). The child
+inherits the user-config `[tools.read_file]` allowlist; the section key
+binds to the tool's `get_name()` (`read_file`), not the UI's namespaced
+display. Follow-up: the generator's allowlist duty must emit the depth
+pattern set instead of the single `**` entry. `--add-dir` was evaluated
+and rejected: it is a launch-only flag with no config-file equivalent.
 
 ## Risks / unknowns
 
