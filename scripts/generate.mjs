@@ -374,6 +374,140 @@ export function mergeSettings(settingsPath, repoRoot) {
   return { changed: true, entry };
 }
 
+function readToml(file) {
+  let raw = fs.readFileSync(file, "utf8");
+  const hadBom = raw.startsWith("\uFEFF");
+  if (hadBom) raw = raw.slice(1);
+  const firstNl = raw.indexOf("\n");
+  const eol = firstNl > 0 && raw[firstNl - 1] === "\r" ? "\r\n" : "\n";
+  return { raw, hadBom, eol, lines: raw.split(/\r?\n/) };
+}
+
+function writeTomlLines(file, parsed, lines) {
+  atomicWrite(file, (parsed.hadBom ? "\uFEFF" : "") + lines.join(parsed.eol));
+}
+
+function tomlArrayElements(str) {
+  const els = [];
+  let i = 0;
+  while (i < str.length) {
+    while (i < str.length && /[\s,]/.test(str[i])) i++;
+    if (i >= str.length) break;
+    const q = str[i];
+    if (q !== '"' && q !== "'") return null;
+    let j = i + 1;
+    while (j < str.length && str[j] !== q) {
+      if (q === '"' && str[j] === "\\") j++;
+      j++;
+    }
+    if (j >= str.length) return null;
+    els.push(str.slice(i, j + 1));
+    i = j + 1;
+  }
+  return els;
+}
+
+function tomlElementContent(el) {
+  const q = el[0];
+  let c = el.slice(1, -1);
+  if (q === '"') c = c.replace(/\\(.)/g, "$1");
+  return c;
+}
+
+function tomlBasicString(s) {
+  return '"' + s.replace(/\\/g, "\\\\").replace(/"/g, '\\"') + '"';
+}
+
+export function mergeVibeConfig(configPath, repoRoot) {
+  const result = { agentPaths: { changed: false }, allowlist: { changed: false } };
+  const entry = path.join(repoRoot, "agents-vibe");
+  const agentErr = `vibe config: agent_paths unmergeable; add "${entry}" to the agent_paths array in ${configPath} manually`;
+
+  let existed = false;
+  let parsed = null;
+  try {
+    existed = fs.existsSync(configPath);
+    if (existed) parsed = readToml(configPath);
+  } catch (e) {
+    result.agentPaths = { changed: false, error: `vibe config: unreadable ${configPath}: ${e.message}` };
+    return result;
+  }
+
+  if (!existed) {
+    try {
+      fs.mkdirSync(path.dirname(configPath), { recursive: true });
+      atomicWrite(configPath, `agent_paths = ["${entry}"]\n`);
+      result.agentPaths = { changed: true };
+    } catch (e) {
+      result.agentPaths = { changed: false, error: `vibe config: cannot create ${configPath}: ${e.message}` };
+    }
+    return result;
+  }
+
+  if (parsed.raw.includes('"""') || parsed.raw.includes("'''")) {
+    result.agentPaths = { changed: false, error: agentErr };
+    result.allowlist = { changed: false, error: `vibe config: [tools.read_file] allowlist unmergeable (multi-line string in file); add it manually` };
+    return result;
+  }
+
+  const lines = [...parsed.lines];
+  const headerIdx = lines.findIndex(l => /^\s*\[/.test(l));
+  const regionEnd = headerIdx === -1 ? lines.length : headerIdx;
+  const keyRe = /^\s*agent_paths\s*=\s*(.*)$/;
+  const hits = [];
+  for (let i = 0; i < regionEnd; i++) {
+    const m = lines[i].match(keyRe);
+    if (m) hits.push({ idx: i, rest: m[1] });
+  }
+
+  if (hits.length > 1) {
+    result.agentPaths = { changed: false, error: agentErr };
+    return result;
+  }
+
+  if (hits.length === 0) {
+    let insertAt = regionEnd;
+    if (headerIdx !== -1) {
+      while (insertAt > 0 && /^\s*#/.test(lines[insertAt - 1])) insertAt--;
+    } else if (lines.length > 0 && lines[lines.length - 1] === "") {
+      insertAt = lines.length - 1;
+    }
+    lines.splice(insertAt, 0, `agent_paths = ["${entry}"]`);
+    if (headerIdx === -1 && lines[lines.length - 1] !== "") lines.push("");
+    try {
+      atomicWrite(configPath + ".bak", (parsed.hadBom ? "\uFEFF" : "") + parsed.raw);
+      writeTomlLines(configPath, parsed, lines);
+      result.agentPaths = { changed: true };
+    } catch (e) {
+      result.agentPaths = { changed: false, error: `vibe config: write failed: ${e.message}` };
+    }
+    return result;
+  }
+
+  const { idx, rest } = hits[0];
+  const arrMatch = rest.match(/^\s*\[(.*)\]\s*$/);
+  const els = arrMatch ? tomlArrayElements(arrMatch[1]) : null;
+  if (els === null) {
+    result.agentPaths = { changed: false, error: agentErr };
+    return result;
+  }
+  const contents = els.map(tomlElementContent);
+  const already = contents.some(c => realPath(expandTilde(c)) === realPath(entry));
+  if (already) {
+    result.agentPaths = { changed: false };
+    return result;
+  }
+  lines[idx] = `agent_paths = [${[...contents.map(tomlBasicString), tomlBasicString(entry)].join(", ")}]`;
+  try {
+    atomicWrite(configPath + ".bak", (parsed.hadBom ? "\uFEFF" : "") + parsed.raw);
+    writeTomlLines(configPath, parsed, lines);
+    result.agentPaths = { changed: true };
+  } catch (e) {
+    result.agentPaths = { changed: false, error: `vibe config: write failed: ${e.message}` };
+  }
+  return result;
+}
+
 export function cloneState(cloneDir) {
   if (!fs.existsSync(cloneDir)) return "missing";
   if (!fs.existsSync(path.join(cloneDir, ".git"))) return "not-a-repo";

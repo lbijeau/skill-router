@@ -698,6 +698,134 @@ test("mergeSettings: .bak is replaced atomically, not written through a symlink"
   clean(root);
 });
 
+test("mergeVibeConfig: missing file is created with agent_paths only", () => {
+  const root = tmp();
+  const sp = path.join(root, "nested", "dir", "config.toml");
+  const r = gen.mergeVibeConfig(sp, root);
+  eq(r.agentPaths.changed, true);
+  eq(r.allowlist.changed, false);
+  eq(fs.readFileSync(sp, "utf8"), `agent_paths = ["${root}/agents-vibe"]\n`);
+  eq(fs.existsSync(sp + ".bak"), false);
+  clean(root);
+});
+
+test("mergeVibeConfig: absent key inserted before the first table, below BOM", () => {
+  const root = tmp(); const sp = path.join(root, "config.toml");
+  w(root, "config.toml", "\uFEFF# top comment\n[tools.bash]\nallowlist = []\n");
+  const r = gen.mergeVibeConfig(sp, root);
+  eq(r.agentPaths.changed, true);
+  const lines = fs.readFileSync(sp, "utf8").replace(/^\uFEFF/, "").split("\n");
+  eq(lines[0], `agent_paths = ["${root}/agents-vibe"]`);
+  eq(lines[1], "# top comment");
+  eq(lines[2], "[tools.bash]");
+  clean(root);
+});
+
+test("mergeVibeConfig: absent key + no tables appends at EOF; missing trailing newline tolerated", () => {
+  const root = tmp(); const sp = path.join(root, "config.toml");
+  w(root, "config.toml", 'active_model = "x"');
+  const r = gen.mergeVibeConfig(sp, root);
+  eq(r.agentPaths.changed, true);
+  eq(fs.readFileSync(sp, "utf8"), `active_model = "x"\nagent_paths = ["${root}/agents-vibe"]\n`);
+  clean(root);
+});
+
+test("mergeVibeConfig: absent key + indented and [[x]] headers still bound the region", () => {
+  const root = tmp(); const sp = path.join(root, "config.toml");
+  w(root, "config.toml", "  [a.b]\nx = 1\n[[c]]\ny = 2\n");
+  const r = gen.mergeVibeConfig(sp, root);
+  eq(r.agentPaths.changed, true);
+  const lines = fs.readFileSync(sp, "utf8").split("\n");
+  eq(lines[0], `agent_paths = ["${root}/agents-vibe"]`);
+  eq(lines[1], "  [a.b]");
+  clean(root);
+});
+
+test("mergeVibeConfig: single-line array merged, idempotent, .bak written", () => {
+  for (const line of [
+    'agent_paths = ["/other"]',
+    'agent_paths=["/other"]',
+    "agent_paths = ['/other']",
+    'agent_paths = ["/other",]',
+  ]) {
+    const root = tmp(); const sp = path.join(root, "config.toml");
+    const before = `${line}\n`;
+    w(root, "config.toml", before);
+    const r1 = gen.mergeVibeConfig(sp, root);
+    eq(r1.agentPaths.changed, true, line);
+    const after = `agent_paths = ["/other", "${root}/agents-vibe"]\n`;
+    eq(fs.readFileSync(sp, "utf8"), after, line);
+    eq(fs.readFileSync(sp + ".bak", "utf8"), before, line);
+    const r2 = gen.mergeVibeConfig(sp, root);
+    eq(r2.agentPaths.changed, false, line);
+    eq(fs.readFileSync(sp, "utf8"), after, line);
+    clean(root);
+  }
+});
+
+test("mergeVibeConfig: agent_paths under a sub-table is invisible, never edited", () => {
+  const root = tmp(); const sp = path.join(root, "config.toml");
+  w(root, "config.toml", '[foo]\nagent_paths = ["/other"]\n');
+  const r = gen.mergeVibeConfig(sp, root);
+  eq(r.agentPaths.changed, true);
+  eq(fs.readFileSync(sp, "utf8"),
+    `agent_paths = ["${root}/agents-vibe"]\n[foo]\nagent_paths = ["/other"]\n`);
+  clean(root);
+});
+
+test("mergeVibeConfig: multi-line array, inline comment, non-array value, duplicate keys all safe-bail", () => {
+  const cases = [
+    'agent_paths = [\n  "/other",\n]\n',
+    'agent_paths = ["/other"] # mine\n',
+    'agent_paths = "/other"\n',
+    'agent_paths = ["/a"]\nagent_paths = ["/b"]\n',
+  ];
+  for (const before of cases) {
+    const root = tmp(); const sp = path.join(root, "config.toml");
+    w(root, "config.toml", before);
+    const r = gen.mergeVibeConfig(sp, root);
+    eq(r.agentPaths.changed, false, before);
+    eq(fs.readFileSync(sp, "utf8"), before);
+    eq(fs.existsSync(sp + ".bak"), false, before);
+    eq(r.agentPaths.error.includes(`add "${root}/agents-vibe" to the agent_paths`), true, before);
+    clean(root);
+  }
+});
+
+test("mergeVibeConfig: any triple-quote string in the file forces safe-bail", () => {
+  const root = tmp(); const sp = path.join(root, "config.toml");
+  const before = 'instructions = """\nagent_paths = ["/fake"]\n"""\n';
+  w(root, "config.toml", before);
+  const r = gen.mergeVibeConfig(sp, root);
+  eq(r.agentPaths.changed, false);
+  eq(fs.readFileSync(sp, "utf8"), before);
+  eq(/unmergeable/.test(r.agentPaths.error), true);
+  clean(root);
+});
+
+test("mergeVibeConfig: CRLF file keeps CRLF on inserted lines", () => {
+  const root = tmp(); const sp = path.join(root, "config.toml");
+  w(root, "config.toml", "[tools.bash]\r\nallowlist = []\r\n");
+  const r = gen.mergeVibeConfig(sp, root);
+  eq(r.agentPaths.changed, true);
+  eq(fs.readFileSync(sp, "utf8"),
+    `agent_paths = ["${root}/agents-vibe"]\r\n[tools.bash]\r\nallowlist = []\r\n`);
+  clean(root);
+});
+
+test("mergeVibeConfig: .bak replaced atomically, not written through a symlink", () => {
+  const root = tmp(); const sp = path.join(root, "config.toml");
+  w(root, "config.toml", 'active_model = "x"\n');
+  w(root, "victim.txt", "do not touch");
+  fs.symlinkSync(path.join(root, "victim.txt"), sp + ".bak");
+  const r = gen.mergeVibeConfig(sp, root);
+  eq(r.agentPaths.changed, true);
+  eq(fs.readFileSync(path.join(root, "victim.txt"), "utf8"), "do not touch");
+  eq(fs.lstatSync(sp + ".bak").isSymbolicLink(), false);
+  eq(fs.readFileSync(sp + ".bak", "utf8"), 'active_model = "x"\n');
+  clean(root);
+});
+
 test("prune: only generated agent files are pruned, user files survive", () => {
   const root = tmp();
   w(root, "repos.json", JSON.stringify({ repos: [
