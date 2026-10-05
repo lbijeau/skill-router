@@ -223,12 +223,27 @@ function tomlEscape(s) {
   return s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
 
-export function renderVibeAgentTOML(entry, skills) {
+// Home-anchored paths keep the committed Vibe artifacts machine-independent
+// (no username baked into git). Vibe's file tools expanduser() every path, so
+// ~ resolves at runtime; outside home the absolute path is the only anchor.
+export function tildePath(absPath, home = os.homedir()) {
+  const p = path.resolve(absPath);
+  const h = path.resolve(home);
+  if (p === h) return "~";
+  if (p.startsWith(h + path.sep)) return "~/" + p.slice(h.length + 1);
+  return p;
+}
+
+export function renderVibeAgentTOML(entry, skills, { home } = {}) {
+  const homeDir = home ?? os.homedir();
   const description = tomlEscape(normalizeTomlText(entry.description));
   const persona = tomlEscape(normalizeTomlText(entry.persona, { keepNewlines: true }));
-  const rows = (skills ?? []).map(s => s.description
-    ? `- ${s.name}: ${tomlEscape(s.description)} — ${path.join(s.dir, "SKILL.md")}`
-    : `- ${s.name} — ${path.join(s.dir, "SKILL.md")}`);
+  const rows = (skills ?? []).map(s => {
+    const file = tildePath(path.join(s.dir, "SKILL.md"), homeDir);
+    return s.description
+      ? `- ${s.name}: ${tomlEscape(s.description)} — ${file}`
+      : `- ${s.name} — ${file}`;
+  });
   return [
     'agent_type = "subagent"',
     `description = "${description}"`,

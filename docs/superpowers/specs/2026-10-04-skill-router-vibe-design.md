@@ -43,7 +43,10 @@ artifacts shows skill-list churn after `update`.
   wiring.
 - A subagent's cwd is the parent session's project cwd (undocumented but
   robustly assumed), so relative paths in `instructions` do not resolve
-  usefully. All paths in generated artifacts are absolute.
+  usefully. Paths in generated artifacts are home-anchored (`~`-relative)
+  when the repo lives under the user's home — Vibe's file tools
+  `expanduser()` every path at runtime — and absolute otherwise; config
+  entries stay absolute (machine-local, never committed).
 - Subagent invocations inherit the parent's hooks (`pre_tool` matchers on
   `read_file` or `task` can deny the file route).
 
@@ -53,7 +56,7 @@ artifacts shows skill-list churn after `update`.
 |---|---|
 | `agents/<name>.md` (committed) | `agents-vibe/<name>.toml` (committed) |
 | `inheritSkills: false` + explicit `skills:` | `disabled_tools = ["skill"]` + embedded skill table in `instructions` |
-| `skillPath: ../skills/<name>` (relative, resolved against agent file) | absolute `SKILL.md` path baked into `instructions` |
+| `skillPath: ../skills/<name>` (relative, resolved against agent file) | home-anchored (`~`) `SKILL.md` path baked into `instructions` |
 | advertised catalog (name + description, load on demand) | skill table (name + description) in `instructions`; agent reads `SKILL.md` via `read_file` |
 | `subagents.agentScanDirs` in `~/.pi/agent/settings.json` | `agent_paths` in `~/.vibe/config.toml` (honors `VIBE_HOME`) |
 | model launches agent by description | same — `description` is the routing signal |
@@ -86,7 +89,7 @@ guarantee with two moves:
    `disabled_tools = ["skill"]`. The subagent cannot load anything from
    the parent's skill catalog through the skill tool.
 2. **Grant the file route.** `instructions` embeds a table of the repo's
-   skills (name + description + absolute `SKILL.md` path). The agent
+   skills (name + description + home-anchored `~` `SKILL.md` path). The agent
    reads the matching `SKILL.md` with `read_file` on demand — the same
   advertise-then-load pattern pi provides, re-homed in the prompt.
 
@@ -142,11 +145,13 @@ Rules:
   "when a task matches one, read it and follow it" sentence mildly
   duplicates the boilerplate; accepted cost of the shared-persona
   tradeoff.
-- **Table rows are single-line**: `- <name>: <description> — <absolute
-  SKILL.md path>`. Full absolute path per row (never a clone-root +
-  relative-path join the child must execute) — deletes a known
-  subagent failure mode (resolving relative-looking paths against its
-  own cwd).
+- **Table rows are single-line**: `- <name>: <description> — <path>`. Full
+  path per row (never a clone-root + relative-path join the child must
+  execute) — deletes a known subagent failure mode (resolving
+  relative-looking paths against its own cwd). The path is home-anchored
+  (`~/...`) when the clone lives under the user's home — Vibe's file
+  tools `expanduser()` it at runtime — and absolute otherwise; the
+  child still receives one self-contained path per row.
 - The fixed boilerplate sentences are machine-independent constants;
   the first one doubles as the prune marker (below).
 - Skills excluded by `skillSource`/`pathExclude` or dropped as
@@ -158,9 +163,11 @@ Rules:
   currently produces no agent on either target).
 - Drift detection is content-based, same as pi: `status` re-renders into
   memory and byte-compares. No "generated" marker inside the file.
-- Committed TOMLs are machine-specific (absolute paths); a new machine
-  regenerates rather than copies. Accepted: the repo already wires into
-  the user's home.
+- Committed TOMLs are home-anchored (`~` paths): no username or
+  machine-specific layout is baked into git. A new machine regenerates
+  only if the repo lives at a different home-relative location than
+  `~/repositories/skill-router` (revision 2026-10-04 of the earlier
+  "absolute paths, regenerate per machine" tradeoff).
 
 ## Description normalization
 
@@ -221,7 +228,7 @@ No new dependencies; node ≥ 18 standard library only.
   pi- or Vibe-side is out of sync; exit stays 0 when only the Vibe
   config merge bailed (report-only, pi parity). A fresh checkout on a
   new machine shows every VIBE column `stale` until the first
-  `install` regenerates absolute paths — expected, not a bug.
+  `install` regenerates home-anchored paths — expected, not a bug.
 - **`install` / `update`** drive both targets in one run — no new
   commands, no flags. The report distinguishes targets per entry, e.g.
   `ponytail: reused, 6 skills, agent written (pi, vibe)`. Update skill
@@ -331,7 +338,7 @@ Fixture-based, offline, no network, no deps — same harness as today.
 
 **Rendering:**
 - Vibe TOML rendering: frontmatter names + normalized descriptions +
-  **absolute per-row paths** in the table; `agent_type`,
+  **home-anchored per-row paths** in the table; `agent_type`,
   `disabled_tools = ["skill"]`; persona verbatim; boilerplate marker
   sentence verbatim.
 - Description normalization: folded (`>`), literal (`|`), `>-`, quoted
@@ -459,10 +466,13 @@ and rejected: it is a launch-only flag with no config-file equivalent.
   mitigation, validated in assumption 3. `pre_tool` hooks matching
   `read_file` (inherited by subagents) can still deny the route —
   user-side, out of this repo's control.
-- **Absolute paths in committed artifacts**: regenerated per machine;
-  cross-machine `git diff` churn; `status` all-`stale` on a new machine
-  until first `install`. Accepted (the repo already bakes the user's
-  home into pi wiring).
+- **Path anchoring in committed artifacts** (revised 2026-10-04): rows are
+  home-anchored (`~`), so no username enters git and same-layout machines
+  share the committed bytes. Residual: a checkout at a different
+  home-relative location shows all-`stale` VIBE columns until its first
+  `install` regenerates; a checkout outside the home dir falls back to
+  absolute (machine-specific) rows. The runtime `expanduser()` behavior
+  was verified against the installed Vibe source before this revision.
 - **Vibe config edits are line-wise**, not a real TOML parser. The
   envelope (strict region grammar, multi-line-string refusal, backup
   first, actionable bail) bounds the blast radius the same way the pi

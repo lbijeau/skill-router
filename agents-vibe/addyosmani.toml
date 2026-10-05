@@ -9,29 +9,29 @@ Your skills are files. When a task matches one, read its SKILL.md with read_file
 If a skill's instructions tell you to use or load another skill, read that skill's SKILL.md the same way and follow it.
 If a read comes back truncated, say so.
 
-- api-and-interface-design: Guides stable API and interface design. — /Users/lucbijeau/repositories/skill-router/skills/addyosmani/skills/api-and-interface-design/SKILL.md
-- browser-testing-with-devtools: Tests in real browsers via Chrome DevTools MCP. — /Users/lucbijeau/repositories/skill-router/skills/addyosmani/skills/browser-testing-with-devtools/SKILL.md
-- ci-cd-and-automation: Automates CI/CD pipeline setup. Use when setting up or modifying build and deployment pipelines. Use when you need to automate quality gates, configure test runners in CI, or establish deployment strategies. — /Users/lucbijeau/repositories/skill-router/skills/addyosmani/skills/ci-cd-and-automation/SKILL.md
-- code-review-and-quality: Conducts multi-axis code review. — /Users/lucbijeau/repositories/skill-router/skills/addyosmani/skills/code-review-and-quality/SKILL.md
-- code-simplification: Simplifies code for clarity. — /Users/lucbijeau/repositories/skill-router/skills/addyosmani/skills/code-simplification/SKILL.md
-- constraint-driven-development: Establishes a project's quality bar as a written contract and stops agents quietly lowering it. — /Users/lucbijeau/repositories/skill-router/skills/addyosmani/skills/constraint-driven-development/SKILL.md
-- context-engineering: Optimizes agent context setup. Use when starting a new session, when agent output quality degrades, when switching between tasks, or when you need to configure rules files and context for a project. — /Users/lucbijeau/repositories/skill-router/skills/addyosmani/skills/context-engineering/SKILL.md
-- debugging-and-error-recovery: Guides systematic root-cause debugging. — /Users/lucbijeau/repositories/skill-router/skills/addyosmani/skills/debugging-and-error-recovery/SKILL.md
-- deprecation-and-migration: Manages deprecation and migration. — /Users/lucbijeau/repositories/skill-router/skills/addyosmani/skills/deprecation-and-migration/SKILL.md
-- documentation-and-adrs: Records decisions and documentation. — /Users/lucbijeau/repositories/skill-router/skills/addyosmani/skills/documentation-and-adrs/SKILL.md
-- doubt-driven-development: Subjects every non-trivial decision to a fresh-context adversarial review before it stands. — /Users/lucbijeau/repositories/skill-router/skills/addyosmani/skills/doubt-driven-development/SKILL.md
-- frontend-ui-engineering: Builds production-quality, accessible, responsive user-facing UIs. — /Users/lucbijeau/repositories/skill-router/skills/addyosmani/skills/frontend-ui-engineering/SKILL.md
-- git-workflow-and-versioning: Structures git workflow practices. — /Users/lucbijeau/repositories/skill-router/skills/addyosmani/skills/git-workflow-and-versioning/SKILL.md
-- idea-refine: Refines raw ideas into sharp, actionable concepts through structured divergent and convergent thinking. — /Users/lucbijeau/repositories/skill-router/skills/addyosmani/skills/idea-refine/SKILL.md
-- incremental-implementation: Delivers changes incrementally in thin, verifiable slices. — /Users/lucbijeau/repositories/skill-router/skills/addyosmani/skills/incremental-implementation/SKILL.md
-- interview-me: Extracts what the user actually wants instead of what they think they should want. — /Users/lucbijeau/repositories/skill-router/skills/addyosmani/skills/interview-me/SKILL.md
-- observability-and-instrumentation: Instruments code so production behavior is visible and diagnosable. — /Users/lucbijeau/repositories/skill-router/skills/addyosmani/skills/observability-and-instrumentation/SKILL.md
-- performance-optimization: Optimizes application performance across frontend, backend, queries, and databases. — /Users/lucbijeau/repositories/skill-router/skills/addyosmani/skills/performance-optimization/SKILL.md
-- planning-and-task-breakdown: Breaks work into ordered tasks. Use when you have a spec or clear requirements and need to break work into implementable tasks. Use when a task feels too large to start, when you need to estimate scope, or when parallel work is possible. — /Users/lucbijeau/repositories/skill-router/skills/addyosmani/skills/planning-and-task-breakdown/SKILL.md
-- security-and-hardening: Hardens code against vulnerabilities. — /Users/lucbijeau/repositories/skill-router/skills/addyosmani/skills/security-and-hardening/SKILL.md
-- shipping-and-launch: Prepares production launches. — /Users/lucbijeau/repositories/skill-router/skills/addyosmani/skills/shipping-and-launch/SKILL.md
-- source-driven-development: Grounds every implementation decision in official documentation. — /Users/lucbijeau/repositories/skill-router/skills/addyosmani/skills/source-driven-development/SKILL.md
-- spec-driven-development: Creates specs before coding. — /Users/lucbijeau/repositories/skill-router/skills/addyosmani/skills/spec-driven-development/SKILL.md
-- test-driven-development: Drives development with tests using the red-green-refactor loop. — /Users/lucbijeau/repositories/skill-router/skills/addyosmani/skills/test-driven-development/SKILL.md
-- using-agent-skills: Discovers and invokes agent skills. Use when starting a session, or when you need to decide which skill or workflow applies to the piece of work at hand. This is the meta-skill that governs how all other skills are discovered and invoked. — /Users/lucbijeau/repositories/skill-router/skills/addyosmani/skills/using-agent-skills/SKILL.md
+- api-and-interface-design: Guides stable API and interface design. — ~/repositories/skill-router/skills/addyosmani/skills/api-and-interface-design/SKILL.md
+- browser-testing-with-devtools: Tests in real browsers via Chrome DevTools MCP. — ~/repositories/skill-router/skills/addyosmani/skills/browser-testing-with-devtools/SKILL.md
+- ci-cd-and-automation: Automates CI/CD pipeline setup. Use when setting up or modifying build and deployment pipelines. Use when you need to automate quality gates, configure test runners in CI, or establish deployment strategies. — ~/repositories/skill-router/skills/addyosmani/skills/ci-cd-and-automation/SKILL.md
+- code-review-and-quality: Conducts multi-axis code review. — ~/repositories/skill-router/skills/addyosmani/skills/code-review-and-quality/SKILL.md
+- code-simplification: Simplifies code for clarity. — ~/repositories/skill-router/skills/addyosmani/skills/code-simplification/SKILL.md
+- constraint-driven-development: Establishes a project's quality bar as a written contract and stops agents quietly lowering it. — ~/repositories/skill-router/skills/addyosmani/skills/constraint-driven-development/SKILL.md
+- context-engineering: Optimizes agent context setup. Use when starting a new session, when agent output quality degrades, when switching between tasks, or when you need to configure rules files and context for a project. — ~/repositories/skill-router/skills/addyosmani/skills/context-engineering/SKILL.md
+- debugging-and-error-recovery: Guides systematic root-cause debugging. — ~/repositories/skill-router/skills/addyosmani/skills/debugging-and-error-recovery/SKILL.md
+- deprecation-and-migration: Manages deprecation and migration. — ~/repositories/skill-router/skills/addyosmani/skills/deprecation-and-migration/SKILL.md
+- documentation-and-adrs: Records decisions and documentation. — ~/repositories/skill-router/skills/addyosmani/skills/documentation-and-adrs/SKILL.md
+- doubt-driven-development: Subjects every non-trivial decision to a fresh-context adversarial review before it stands. — ~/repositories/skill-router/skills/addyosmani/skills/doubt-driven-development/SKILL.md
+- frontend-ui-engineering: Builds production-quality, accessible, responsive user-facing UIs. — ~/repositories/skill-router/skills/addyosmani/skills/frontend-ui-engineering/SKILL.md
+- git-workflow-and-versioning: Structures git workflow practices. — ~/repositories/skill-router/skills/addyosmani/skills/git-workflow-and-versioning/SKILL.md
+- idea-refine: Refines raw ideas into sharp, actionable concepts through structured divergent and convergent thinking. — ~/repositories/skill-router/skills/addyosmani/skills/idea-refine/SKILL.md
+- incremental-implementation: Delivers changes incrementally in thin, verifiable slices. — ~/repositories/skill-router/skills/addyosmani/skills/incremental-implementation/SKILL.md
+- interview-me: Extracts what the user actually wants instead of what they think they should want. — ~/repositories/skill-router/skills/addyosmani/skills/interview-me/SKILL.md
+- observability-and-instrumentation: Instruments code so production behavior is visible and diagnosable. — ~/repositories/skill-router/skills/addyosmani/skills/observability-and-instrumentation/SKILL.md
+- performance-optimization: Optimizes application performance across frontend, backend, queries, and databases. — ~/repositories/skill-router/skills/addyosmani/skills/performance-optimization/SKILL.md
+- planning-and-task-breakdown: Breaks work into ordered tasks. Use when you have a spec or clear requirements and need to break work into implementable tasks. Use when a task feels too large to start, when you need to estimate scope, or when parallel work is possible. — ~/repositories/skill-router/skills/addyosmani/skills/planning-and-task-breakdown/SKILL.md
+- security-and-hardening: Hardens code against vulnerabilities. — ~/repositories/skill-router/skills/addyosmani/skills/security-and-hardening/SKILL.md
+- shipping-and-launch: Prepares production launches. — ~/repositories/skill-router/skills/addyosmani/skills/shipping-and-launch/SKILL.md
+- source-driven-development: Grounds every implementation decision in official documentation. — ~/repositories/skill-router/skills/addyosmani/skills/source-driven-development/SKILL.md
+- spec-driven-development: Creates specs before coding. — ~/repositories/skill-router/skills/addyosmani/skills/spec-driven-development/SKILL.md
+- test-driven-development: Drives development with tests using the red-green-refactor loop. — ~/repositories/skill-router/skills/addyosmani/skills/test-driven-development/SKILL.md
+- using-agent-skills: Discovers and invokes agent skills. Use when starting a session, or when you need to decide which skill or workflow applies to the piece of work at hand. This is the meta-skill that governs how all other skills are discovered and invoked. — ~/repositories/skill-router/skills/addyosmani/skills/using-agent-skills/SKILL.md
 """

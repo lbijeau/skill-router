@@ -245,6 +245,30 @@ test("writeAgentFiles: writes, idempotent, removes zero-skill leftovers", () => 
   clean(root);
 });
 
+test("tildePath: paths under home become ~-relative, others unchanged", () => {
+  const home = "/fake/home";
+  eq(gen.tildePath("/fake/home/repos/x/skills/a/SKILL.md", home), "~/repos/x/skills/a/SKILL.md");
+  eq(gen.tildePath("/fake/home", home), "~");
+  eq(gen.tildePath("/fake/other/x", home), "/fake/other/x");
+  eq(gen.tildePath("/fake/homes/x", home), "/fake/homes/x");   // shared prefix, not under
+});
+
+test("renderVibeAgentTOML: skill rows under home use ~-anchored paths", () => {
+  const home = "/fake/home";
+  const out = gen.renderVibeAgentTOML({ name: "x", description: "d", persona: "p" },
+    [{ name: "a", dir: "/fake/home/repositories/skill-router/skills/x/a", description: "desc" }],
+    { home });
+  eq(out.includes("- a: desc — ~/repositories/skill-router/skills/x/a/SKILL.md"), true);
+  eq(out.includes("/fake/home"), false);   // no home path leaks into the file
+});
+
+test("renderVibeAgentTOML: rows outside home stay absolute", () => {
+  const home = "/fake/home";
+  const out = gen.renderVibeAgentTOML({ name: "x", description: "d", persona: "p" },
+    [{ name: "a", dir: "/opt/elsewhere/skills/x/a", description: null }], { home });
+  eq(out.includes("- a — /opt/elsewhere/skills/x/a/SKILL.md"), true);
+});
+
 test("writeVibeAgentFiles: writes, idempotent, removes zero-skill leftovers", () => {
   const root = tmp();
   w(root, "repos.json", JSON.stringify({ repos: [

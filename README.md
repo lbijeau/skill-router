@@ -37,8 +37,10 @@ Launch one from any project with the `subagent` tool, e.g. agent
   (committed): one TOML per repo with `agent_type = "subagent"`,
   `disabled_tools = ["skill"]` (the subagent cannot load the parent's
   skill catalog — that is the clean-room), and an `instructions` skill
-  table listing each skill's name, description, and absolute `SKILL.md`
-  path. The subagent reads skills as files on demand.
+  table listing each skill's name, description, and home-anchored
+  (`~`-relative) `SKILL.md` path — Vibe's file tools expanduser() every
+  path at runtime, so the committed TOMLs carry no machine-specific
+  usernames (checkouts outside the home dir fall back to absolute paths).
 - Vibe wiring goes into `~/.vibe/config.toml` (or `$VIBE_HOME/config.toml`):
   `agent_paths` gains the `agents-vibe/` directory, and
   `[tools.read_file]` gains depth-pattern allowlist entries
