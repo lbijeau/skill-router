@@ -40,12 +40,16 @@ Launch one from any project with the `subagent` tool, e.g. agent
   table listing each skill's name, description, and absolute `SKILL.md`
   path. The subagent reads skills as files on demand.
 - Vibe wiring goes into `~/.vibe/config.toml` (or `$VIBE_HOME/config.toml`):
-  `agent_paths` gains the `agents-vibe/` directory, and a
-  `[tools.read_file]` allowlist entry for `skills/**` auto-approves clone
-  reads from sessions in other projects (Vibe's default outside-workdir
-  rule would otherwise prompt or deny). Config edits are line-wise with a
-  `.bak` backup; forms the generator cannot merge safely (multi-line
-  arrays, multi-line strings) are skipped with the exact manual remedy
+  `agent_paths` gains the `agents-vibe/` directory, and
+  `[tools.read_file]` gains depth-pattern allowlist entries
+  (`skills/*` … `skills/*`×8) that auto-approve clone reads from sessions
+  in other projects — Vibe's default outside-workdir rule would
+  otherwise prompt on every read. (The patterns are one-per-depth
+  because Vibe matches absolute allowlist patterns with
+  component-strict pathlib rules: a single `skills/**` matches nothing.)
+  Config edits are line-wise with a `.bak` backup; forms the generator
+  cannot merge safely (multi-line arrays, multi-line strings,
+  unrecognized table variants) are skipped with the exact manual remedy
   printed. Run `/reload` (or restart Vibe) after installing; note that
   `enabled_agents` / `disabled_agents` config filters override discovery.
 - Removing or renaming a manifest entry prunes its agent file and clone on

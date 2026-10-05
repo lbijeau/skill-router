@@ -446,9 +446,14 @@ function tomlBasicString(s) {
 export function mergeVibeConfig(configPath, repoRoot) {
   const result = { agentPaths: { changed: false }, allowlist: { changed: false } };
   const agentsEntry = path.join(repoRoot, "agents-vibe");
-  const allowEntry = path.join(repoRoot, "skills") + "/**";
+  // Vibe matches absolute allowlist patterns with component-strict pathlib
+  // rules: a single `**` matches nothing below the base. One pattern per
+  // depth (1..8) covers every real skill path.
+  const allowPatterns = Array.from({ length: 8 },
+    (_, i) => path.join(repoRoot, "skills") + "/*".repeat(i + 1));
+  const allowLine = `allowlist = [${allowPatterns.map(tomlBasicString).join(", ")}]`;
   const agentErr = `vibe config: agent_paths unmergeable; add "${agentsEntry}" to the agent_paths array in ${configPath} manually`;
-  const allowErr = `vibe config: [tools.read_file] allowlist unmergeable; add "${allowEntry}" to the allowlist array in ${configPath} manually`;
+  const allowErr = `vibe config: [tools.read_file] allowlist unmergeable; add the depth patterns "${allowPatterns[0]}" through "${allowPatterns[allowPatterns.length - 1]}" to the allowlist array in ${configPath} manually`;
 
   let existed = false;
   let parsed = null;
@@ -466,7 +471,7 @@ export function mergeVibeConfig(configPath, repoRoot) {
     try {
       fs.mkdirSync(path.dirname(configPath), { recursive: true });
       atomicWrite(configPath,
-        `agent_paths = ["${agentsEntry}"]\n\n[tools.read_file]\nallowlist = ["${allowEntry}"]\n`);
+        `agent_paths = ["${agentsEntry}"]\n\n[tools.read_file]\n${allowLine}\n`);
       result.agentPaths = { changed: true };
       result.allowlist = { changed: true };
     } catch (e) {
@@ -548,7 +553,7 @@ export function mergeVibeConfig(configPath, repoRoot) {
     result.allowlist = { changed: false, error: allowErr };
   } else if (exactHeader === -1) {
     if (lines[lines.length - 1] !== "") lines.push("");
-    lines.splice(lines.length - 1, 0, "", "[tools.read_file]", `allowlist = ["${allowEntry}"]`);
+    lines.splice(lines.length - 1, 0, "", "[tools.read_file]", allowLine);
     dirty = true;
     result.allowlist = { changed: true };
   } else {
@@ -564,7 +569,7 @@ export function mergeVibeConfig(configPath, repoRoot) {
     if (aHits.length > 1) {
       result.allowlist = { changed: false, error: allowErr };
     } else if (aHits.length === 0) {
-      lines.splice(exactHeader + 1, 0, `allowlist = ["${allowEntry}"]`);
+      lines.splice(exactHeader + 1, 0, allowLine);
       dirty = true;
       result.allowlist = { changed: true };
     } else {
@@ -574,12 +579,16 @@ export function mergeVibeConfig(configPath, repoRoot) {
       const contents = els ? tomlArrayContents(els) : null;
       if (contents === null) {
         result.allowlist = { changed: false, error: allowErr };
-      } else if (contents.includes(allowEntry)) {
-        result.allowlist = { changed: false };
       } else {
-        lines[idx] = `allowlist = [${[...contents.map(tomlBasicString), tomlBasicString(allowEntry)].join(", ")}]`;
-        dirty = true;
-        result.allowlist = { changed: true };
+        const missing = allowPatterns.filter(p => !contents.includes(p));
+        if (missing.length === 0) {
+          result.allowlist = { changed: false };
+        } else {
+          lines[idx] = `allowlist = [${[...contents.map(tomlBasicString),
+            ...missing.map(tomlBasicString)].join(", ")}]`;
+          dirty = true;
+          result.allowlist = { changed: true };
+        }
       }
     }
   }
@@ -779,7 +788,7 @@ function runFlow(root, settingsPath, vibeConfigPath, mode) {
     report.push(vc.allowlist.error
       ? `vibe config: allowlist skipped (${vc.allowlist.error})`
       : vc.allowlist.changed
-        ? `vibe config: allowlist added ${path.join(root, "skills")}/**`
+        ? `vibe config: allowlist added ${path.join(root, "skills")}/* (+${7} depth patterns)`
         : "vibe config: allowlist already configured");
   }
   report.push("reminder: run /reload (or restart Vibe) to pick up new agents");

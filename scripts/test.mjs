@@ -644,7 +644,7 @@ test("install: writes both targets, wires both settings", () => {
     gen.renderVibeAgentTOML({ name: "a", description: "d", persona: "p" }, found.skills));
   const cfg = fs.readFileSync(vp, "utf8");
   eq(cfg.includes(`agent_paths = ["${path.join(root, "agents-vibe")}"]`), true);
-  eq(cfg.includes(`allowlist = ["${path.join(root, "skills")}/**"]`), true);
+  eq(cfg.includes(`allowlist = ["${path.join(root, "skills")}/*"`), true);
   eq(JSON.parse(fs.readFileSync(sp, "utf8")).subagents.agentScanDirs[0], path.join(root, "agents"));
   clean(root);
 });
@@ -822,6 +822,14 @@ test("mergeSettings: .bak is replaced atomically, not written through a symlink"
   clean(root);
 });
 
+// The [tools.read_file] allowlist entries the generator ensures: Vibe matches
+// absolute allowlist patterns with component-strict pathlib rules, so a single
+// `**` matches nothing — the generator emits one pattern per depth, 1..8.
+const allowPatterns = (root) =>
+  Array.from({ length: 8 }, (_, i) => `${root}/skills${"/*".repeat(i + 1)}`);
+const allowLine = (root, extra = []) =>
+  `allowlist = [${[...extra, ...allowPatterns(root)].map(p => `"${p}"`).join(", ")}]`;
+
 test("mergeVibeConfig: missing file is created with agent_paths and the allowlist table", () => {
   const root = tmp();
   const sp = path.join(root, "nested", "dir", "config.toml");
@@ -829,7 +837,7 @@ test("mergeVibeConfig: missing file is created with agent_paths and the allowlis
   eq(r.agentPaths.changed, true);
   eq(r.allowlist.changed, true);
   eq(fs.readFileSync(sp, "utf8"),
-    `agent_paths = ["${root}/agents-vibe"]\n\n[tools.read_file]\nallowlist = ["${root}/skills/**"]\n`);
+    `agent_paths = ["${root}/agents-vibe"]\n\n[tools.read_file]\n${allowLine(root)}\n`);
   eq(fs.existsSync(sp + ".bak"), false);
   clean(root);
 });
@@ -852,7 +860,7 @@ test("mergeVibeConfig: absent key + no tables appends at EOF; missing trailing n
   const r = gen.mergeVibeConfig(sp, root);
   eq(r.agentPaths.changed, true);
   eq(fs.readFileSync(sp, "utf8"),
-    `active_model = "x"\nagent_paths = ["${root}/agents-vibe"]\n\n[tools.read_file]\nallowlist = ["${root}/skills/**"]\n`);
+    `active_model = "x"\nagent_paths = ["${root}/agents-vibe"]\n\n[tools.read_file]\n${allowLine(root)}\n`);
   clean(root);
 });
 
@@ -879,7 +887,7 @@ test("mergeVibeConfig: single-line array merged, idempotent, .bak written", () =
     w(root, "config.toml", before);
     const r1 = gen.mergeVibeConfig(sp, root);
     eq(r1.agentPaths.changed, true, line);
-    const after = `agent_paths = ["/other", "${root}/agents-vibe"]\n\n[tools.read_file]\nallowlist = ["${root}/skills/**"]\n`;
+    const after = `agent_paths = ["/other", "${root}/agents-vibe"]\n\n[tools.read_file]\n${allowLine(root)}\n`;
     eq(fs.readFileSync(sp, "utf8"), after, line);
     eq(fs.readFileSync(sp + ".bak", "utf8"), before, line);
     const r2 = gen.mergeVibeConfig(sp, root);
@@ -895,7 +903,7 @@ test("mergeVibeConfig: agent_paths under a sub-table is invisible, never edited"
   const r = gen.mergeVibeConfig(sp, root);
   eq(r.agentPaths.changed, true);
   eq(fs.readFileSync(sp, "utf8"),
-    `agent_paths = ["${root}/agents-vibe"]\n[foo]\nagent_paths = ["/other"]\n\n[tools.read_file]\nallowlist = ["${root}/skills/**"]\n`);
+    `agent_paths = ["${root}/agents-vibe"]\n[foo]\nagent_paths = ["/other"]\n\n[tools.read_file]\n${allowLine(root)}\n`);
   clean(root);
 });
 
@@ -909,7 +917,7 @@ test("mergeVibeConfig: multi-line array, inline comment, non-array value, duplic
   for (const head of cases) {
     const root = tmp(); const sp = path.join(root, "config.toml");
     // allowlist duty pre-satisfied so the fixture pins the agent_paths bail alone
-    const before = `${head}\n[tools.read_file]\nallowlist = ["${root}/skills/**"]\n`;
+    const before = `${head}\n[tools.read_file]\n${allowLine(root)}\n`;
     w(root, "config.toml", before);
     const r = gen.mergeVibeConfig(sp, root);
     eq(r.agentPaths.changed, false, head);
@@ -937,7 +945,7 @@ test("mergeVibeConfig: CRLF file keeps CRLF on inserted lines", () => {
   const r = gen.mergeVibeConfig(sp, root);
   eq(r.agentPaths.changed, true);
   eq(fs.readFileSync(sp, "utf8"),
-    `agent_paths = ["${root}/agents-vibe"]\r\n[tools.bash]\r\nallowlist = []\r\n\r\n[tools.read_file]\r\nallowlist = ["${root}/skills/**"]\r\n`);
+    `agent_paths = ["${root}/agents-vibe"]\r\n[tools.bash]\r\nallowlist = []\r\n\r\n[tools.read_file]\r\n${allowLine(root)}\r\n`);
   clean(root);
 });
 
@@ -961,7 +969,7 @@ test("mergeVibeConfig: absent allowlist table appended at EOF", () => {
   eq(r.allowlist.changed, true);
   eq(r.agentPaths.changed, true);
   eq(fs.readFileSync(sp, "utf8"),
-    `agent_paths = ["/other", "${root}/agents-vibe"]\n[other]\nx = 1\n\n[tools.read_file]\nallowlist = ["${root}/skills/**"]\n`);
+    `agent_paths = ["/other", "${root}/agents-vibe"]\n[other]\nx = 1\n\n[tools.read_file]\n${allowLine(root)}\n`);
   clean(root);
 });
 
@@ -972,7 +980,7 @@ test("mergeVibeConfig: single-line allowlist merged, idempotent, .bak written on
   const r1 = gen.mergeVibeConfig(sp, root);
   eq(r1.allowlist.changed, true);
   eq(r1.agentPaths.changed, true);
-  const after = `agent_paths = ["${root}/agents-vibe"]\n[tools.read_file]\nallowlist = ["/safe/**", "${root}/skills/**"]\n`;
+  const after = `agent_paths = ["${root}/agents-vibe"]\n[tools.read_file]\n${allowLine(root, ["/safe/**"])}\n`;
   eq(fs.readFileSync(sp, "utf8"), after);
   eq(fs.readFileSync(sp + ".bak", "utf8"), before);
   const r2 = gen.mergeVibeConfig(sp, root);
@@ -989,7 +997,7 @@ test("mergeVibeConfig: dotted variant table forces bail with remedy", () => {
   const r = gen.mergeVibeConfig(sp, root);
   eq(r.allowlist.changed, false);
   eq(r.agentPaths.changed, false);
-  eq(r.allowlist.error.includes(`add "${root}/skills/**" to the allowlist`), true);
+  eq(r.allowlist.error.includes(`add the depth patterns "${root}/skills/*"`), true);
   eq(fs.readFileSync(sp, "utf8"), before);
   clean(root);
 });
@@ -1004,7 +1012,7 @@ test("mergeVibeConfig: multi-line allowlist or inline comment bails with remedy"
     w(root, "config.toml", before);
     const r = gen.mergeVibeConfig(sp, root);
     eq(r.allowlist.changed, false, tail);
-    eq(r.allowlist.error.includes(`add "${root}/skills/**" to the allowlist`), true, tail);
+    eq(r.allowlist.error.includes(`add the depth patterns "${root}/skills/*"`), true, tail);
     eq(fs.readFileSync(sp, "utf8"), before);
     eq(fs.existsSync(sp + ".bak"), false, tail);
     clean(root);
@@ -1019,7 +1027,7 @@ test("mergeVibeConfig: table present with no allowlist key inserts under header,
   eq(r.allowlist.changed, true);
   eq(r.agentPaths.changed, false);
   eq(fs.readFileSync(sp, "utf8"),
-    `agent_paths = ["${root}/agents-vibe"]\n[tools.read_file]\nallowlist = ["${root}/skills/**"]\npermission = "ask"\n`);
+    `agent_paths = ["${root}/agents-vibe"]\n[tools.read_file]\n${allowLine(root)}\npermission = "ask"\n`);
   clean(root);
 });
 
@@ -1036,7 +1044,7 @@ test("mergeVibeConfig: unrecognized [tools.read_file] forms never duplicate the 
     w(root, "config.toml", before);
     const r = gen.mergeVibeConfig(sp, root);
     eq(r.allowlist.changed, false, tail);
-    eq(r.allowlist.error.includes(`add "${root}/skills/**" to the allowlist`), true, tail);
+    eq(r.allowlist.error.includes(`add the depth patterns "${root}/skills/*"`), true, tail);
     eq(fs.readFileSync(sp, "utf8"), before);
     eq(fs.existsSync(sp + ".bak"), false, tail);
     clean(root);
@@ -1055,7 +1063,7 @@ test("mergeVibeConfig: recognized [tools.read_file] header variants merge withou
     const r = gen.mergeVibeConfig(sp, root);
     eq(r.agentPaths.changed, false, header);
     eq(r.allowlist.changed, true, header);
-    eq(fs.readFileSync(sp, "utf8"), `${before}allowlist = ["${root}/skills/**"]\n`, header);
+    eq(fs.readFileSync(sp, "utf8"), `${before}${allowLine(root)}\n`, header);
     clean(root);
   }
 });
@@ -1070,7 +1078,7 @@ test("mergeVibeConfig: populated multi-line array with bracket-initial continuat
   eq(fs.readFileSync(sp, "utf8"), before);
   eq(fs.existsSync(sp + ".bak"), false);
   eq(r.agentPaths.error.includes(`add "${root}/agents-vibe" to the agent_paths`), true);
-  eq(r.allowlist.error.includes(`add "${root}/skills/**" to the allowlist`), true);
+  eq(r.allowlist.error.includes(`add the depth patterns "${root}/skills/*"`), true);
   clean(root);
 });
 
@@ -1086,7 +1094,7 @@ test("mergeVibeConfig: unclosed array opener anywhere forces safe-bail", () => {
     eq(fs.readFileSync(sp, "utf8"), before);
     eq(fs.existsSync(sp + ".bak"), false, String(withPaths));
     eq(r.agentPaths.error.includes(`add "${root}/agents-vibe" to the agent_paths`), true, String(withPaths));
-    eq(r.allowlist.error.includes(`add "${root}/skills/**" to the allowlist`), true, String(withPaths));
+    eq(r.allowlist.error.includes(`add the depth patterns "${root}/skills/*"`), true, String(withPaths));
     clean(root);
   }
 });
@@ -1102,7 +1110,7 @@ test("mergeVibeConfig: suspicious escape in an existing element bails; legit esc
     // allowlist duty still appends its table without touching that line
     const out = fs.readFileSync(sp, "utf8");
     eq(out.startsWith('agent_paths = ["/a\\u0020b"]\n\n[tools.read_file]\n'), true);
-    eq(out.includes(`allowlist = ["${root}/skills/**"]`), true);
+    eq(out.includes(allowLine(root)), true);
     eq(r.agentPaths.error.includes(`add "${root}/agents-vibe" to the agent_paths`), true);
     clean(root);
   }
@@ -1112,7 +1120,7 @@ test("mergeVibeConfig: suspicious escape in an existing element bails; legit esc
     const r = gen.mergeVibeConfig(sp, root);
     eq(r.agentPaths.changed, true);
     eq(fs.readFileSync(sp, "utf8"),
-      `agent_paths = ["/a\\"b", "${root}/agents-vibe"]\n\n[tools.read_file]\nallowlist = ["${root}/skills/**"]\n`);
+      `agent_paths = ["/a\\"b", "${root}/agents-vibe"]\n\n[tools.read_file]\n${allowLine(root)}\n`);
     clean(root);
   }
 });
