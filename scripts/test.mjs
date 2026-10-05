@@ -484,6 +484,48 @@ test("renderAgentFile: multi-line description is escaped into one YAML line", ()
   eq(out.split("\n")[2], 'description: "line1\\nline2"');
 });
 
+test("renderVibeAgentTOML: exact bytes, one skill with description", () => {
+  const entry = { name: "x", description: `Says "no"`, persona: "You are X." };
+  const dir = "/abs/root/skills/x/core";
+  eq(gen.renderVibeAgentTOML(entry, [{ name: "core", dir, description: "does things" }]),
+`agent_type = "subagent"
+description = "Says \\"no\\""
+disabled_tools = ["skill"]
+instructions = """
+You are X.
+
+${gen.VIBE_BOILERPLATE}
+
+- core: does things — /abs/root/skills/x/core/SKILL.md
+"""
+`);
+});
+
+test("renderVibeAgentTOML: name-only row when description null, multiple rows", () => {
+  const entry = { name: "x", description: "d", persona: "p" };
+  const out = gen.renderVibeAgentTOML(entry, [
+    { name: "a", dir: "/r/a", description: null },
+    { name: "b", dir: "/r/b", description: "desc b" },
+  ]);
+  eq(out.includes("- a — /r/a/SKILL.md\n- b: desc b — /r/b/SKILL.md"), true);
+});
+
+test("renderVibeAgentTOML: escaping survives quotes, backslashes, and triple quotes", () => {
+  const entry = { name: "x", description: 'd\\"q', persona: 'Ends with quote " and """ triple' };
+  const out = gen.renderVibeAgentTOML(entry, [{ name: "a", dir: "/r/a", description: null }]);
+  eq(out.startsWith(`agent_type = "subagent"\ndescription = "d\\\\\\"q"`), true);
+  eq(out.includes('quote \\" and \\"\\"\\" triple'), true);
+  const body = out.slice(out.indexOf('instructions = """') + 18, out.lastIndexOf('"""'));
+  eq(body.includes('"""'), false);   // no unescaped terminator inside the body
+});
+
+test("renderVibeAgentTOML: CRLF persona is normalized, no \\r in output", () => {
+  const out = gen.renderVibeAgentTOML(
+    { name: "x", description: "d", persona: "line1\r\nline2" }, []);
+  eq(out.includes("\r"), false);
+  eq(out.includes("line1\nline2"), true);
+});
+
 test("install: clone failure leaves pre-existing agent file untouched", () => {
   const root = tmp(); const sp = path.join(root, "settings.json");
   const remote = bareRemote(root); remote.add(path.join("skills", "one"), "one");

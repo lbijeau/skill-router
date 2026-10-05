@@ -202,6 +202,48 @@ export function renderAgentFile(entry, skillNames) {
   ].join("\n");
 }
 
+export const VIBE_MARKER = "You have no skill tool; if one is offered anyway, do not use it.";
+export const VIBE_BOILERPLATE = [
+  VIBE_MARKER,
+  "Your skills are files. When a task matches one, read its SKILL.md with read_file and follow it.",
+  "If a skill's instructions tell you to use or load another skill, read that skill's SKILL.md the same way and follow it.",
+  "If a read comes back truncated, say so.",
+].join("\n");
+
+function normalizeTomlText(s, { keepNewlines = false } = {}) {
+  let out = String(s)
+    .replace(/\r\n?/g, "\n")
+    .replace(/\t/g, " ")
+    .replace(/[\u0000-\u0008\u000B-\u001F\u007F]/g, " ");
+  if (!keepNewlines) out = out.replace(/\n/g, " ");
+  return out.replace(/[ ]{2,}/g, " ").trim();
+}
+
+function tomlEscape(s) {
+  return s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
+export function renderVibeAgentTOML(entry, skills) {
+  const description = tomlEscape(normalizeTomlText(entry.description));
+  const persona = tomlEscape(normalizeTomlText(entry.persona, { keepNewlines: true }));
+  const rows = (skills ?? []).map(s => s.description
+    ? `- ${s.name}: ${tomlEscape(s.description)} — ${path.join(s.dir, "SKILL.md")}`
+    : `- ${s.name} — ${path.join(s.dir, "SKILL.md")}`);
+  return [
+    'agent_type = "subagent"',
+    `description = "${description}"`,
+    'disabled_tools = ["skill"]',
+    'instructions = """',
+    persona,
+    "",
+    VIBE_BOILERPLATE,
+    "",
+    ...rows,
+    '"""',
+    "",
+  ].join("\n");
+}
+
 export function writeAgentFiles(root, manifest, skip = new Set()) {
   const agentsDir = path.join(root, "agents");
   fs.mkdirSync(agentsDir, { recursive: true });
