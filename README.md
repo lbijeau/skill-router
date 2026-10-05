@@ -1,8 +1,9 @@
 # skill-router
 
-One clean-room pi agent per third-party skills repo. Each generated agent
-sees exactly one repo's skills — no bleed from your normal skill catalog —
-so the agent behaves like that repo's author intended.
+One clean-room agent per third-party skills repo, for both **pi** and
+**Mistral Vibe**. Each generated agent sees exactly one repo's skills —
+no bleed from your normal skill catalog — so the agent behaves like that
+repo's author intended.
 
 The pinned upstream projects and their licenses are listed in
 [ATTRIBUTIONS.md](ATTRIBUTIONS.md).
@@ -10,7 +11,7 @@ The pinned upstream projects and their licenses are listed in
 ## Quickstart
 
 ```sh
-./install.sh install   # clone repos, generate agents, wire pi settings
+./install.sh install   # clone repos, generate agents, wire pi + Vibe settings
 ./install.sh update    # git pull each clone, regenerate, report deltas
 ./install.sh status    # read-only health table
 ```
@@ -32,6 +33,25 @@ Launch one from any project with the `subagent` tool, e.g. agent
 - `install`/`update` idempotently add
   `subagents.agentScanDirs: ["~/repositories/skill-router/agents"]` to
   `~/.pi/agent/settings.json`, making the agents discoverable everywhere.
+- The same run also generates **Vibe** subagents into `agents-vibe/`
+  (committed): one TOML per repo with `agent_type = "subagent"`,
+  `disabled_tools = ["skill"]` (the subagent cannot load the parent's
+  skill catalog — that is the clean-room), and an `instructions` skill
+  table listing each skill's name, description, and absolute `SKILL.md`
+  path. The subagent reads skills as files on demand.
+- Vibe wiring goes into `~/.vibe/config.toml` (or `$VIBE_HOME/config.toml`):
+  `agent_paths` gains the `agents-vibe/` directory, and
+  `[tools.read_file]` gains depth-pattern allowlist entries
+  (`skills/*` … `skills/*`×8) that auto-approve clone reads from sessions
+  in other projects — Vibe's default outside-workdir rule would
+  otherwise prompt on every read. (The patterns are one-per-depth
+  because Vibe matches absolute allowlist patterns with
+  component-strict pathlib rules: a single `skills/**` matches nothing.)
+  Config edits are line-wise with a `.bak` backup; forms the generator
+  cannot merge safely (multi-line arrays, multi-line strings,
+  unrecognized table variants) are skipped with the exact manual remedy
+  printed. Run `/reload` (or restart Vibe) after installing; note that
+  `enabled_agents` / `disabled_agents` config filters override discovery.
 - Removing or renaming a manifest entry prunes its agent file and clone on
   the next run.
 
@@ -62,9 +82,11 @@ Edit `repos.json` and rerun `./install.sh update`:
 ## Uninstall
 
 ```sh
-rm -rf agents skills                      # generated artifacts + clones
+rm -rf agents agents-vibe skills      # generated artifacts + clones
 # remove the "~/repositories/skill-router/agents" entry from
 # ~/.pi/agent/settings.json -> subagents.agentScanDirs
+# and, from ~/.vibe/config.toml: the agents-vibe entry in agent_paths
+# and the skills/** entry in [tools.read_file] -> allowlist
 ```
 
 ## Tests

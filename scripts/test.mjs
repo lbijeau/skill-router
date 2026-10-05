@@ -124,6 +124,49 @@ test("discovery: CRLF frontmatter name has no stray \\r", () => {
   clean(root);
 });
 
+test("parseSkillFrontmatter: single-line, quoted, folded, literal, missing", () => {
+  const f = (desc) => gen.parseSkillFrontmatter(`---\nname: a\n${desc}\n---\n`);
+  eq(f("description: plain text").description, "plain text");
+  eq(f('description: "quoted text"').description, "quoted text");
+  eq(f("description: >\n  folded one\n  folded two").description, "folded one folded two");
+  eq(f("description: |-\n  lit one\n  lit two").description, "lit one lit two");
+  eq(f("description:").description, null);
+  eq(f("description: >\n  win").name, "a");   // closed detection still works
+  eq(gen.parseSkillFrontmatter("---\nname: a\n").closed, false);
+});
+
+test("parseSkillFrontmatter: folded block containing a name: line keeps name resolution", () => {
+  const r = gen.parseSkillFrontmatter(
+    "---\ndescription: >\n  name: not-a-name\n  more text\nname: real\n---\n");
+  eq(r.name, "real");
+  eq(r.description, "name: not-a-name more text");
+});
+
+test("parseSkillFrontmatter: truncation at 240 (sentence, word, hard branches)", () => {
+  const long = "word ".repeat(80).trim();                       // 399 chars, no punctuation
+  const sent = "First sentence. " + long;                       // sentence boundary < 240
+  const f = (d) => gen.parseSkillFrontmatter(`---\nname: a\n${d}\n---\n`);
+  eq(f("description: " + sent).description, "First sentence.");
+  // last space with index < 240 is at 239; the space itself is dropped
+  eq(f("description: " + long).description, long.slice(0, 239) + "…");
+  const noSpace = "x".repeat(300);
+  const h = f("description: " + noSpace).description;
+  eq(h.length, 241); eq(h.startsWith("x".repeat(240)), true); eq(h.endsWith("…"), true);
+});
+
+test("parseSkillFrontmatter: CRLF description carries no \\r", () => {
+  const r = gen.parseSkillFrontmatter("---\r\nname: a\r\ndescription: d\r\n---\r\n");
+  eq(r.description, "d");
+});
+
+test("discovery: refs carry normalized description", () => {
+  const root = tmp();
+  skill(root, "skills/one");                                   // fixture writes "description: test skill"
+  const r = gen.discoverSkills(root, E());
+  eq(r.skills[0].description, "test skill");
+  clean(root);
+});
+
 test("discovery: first sorted path wins collisions, loser reported", () => {
   const root = tmp();
   skill(root, "aaa/dup", "dup");
@@ -199,6 +242,36 @@ test("writeAgentFiles: writes, idempotent, removes zero-skill leftovers", () => 
   gen.writeAgentFiles(root, gen.loadManifest(root));
   eq(fs.readFileSync(path.join(root, "agents/one.md"), "utf8"), first);
   eq(fs.existsSync(path.join(root, "agents/zero.md")), false);
+  clean(root);
+});
+
+test("writeVibeAgentFiles: writes, idempotent, removes zero-skill leftovers", () => {
+  const root = tmp();
+  w(root, "repos.json", JSON.stringify({ repos: [
+    { name: "one", url: "https://github.com/x/y", description: "d", persona: "p" },
+    { name: "zero", url: "https://github.com/x/y", description: "d", persona: "p" },
+  ]}));
+  skill(root, "skills/one/a");
+  w(root, "agents-vibe/zero.toml", "stale");
+  const m = gen.loadManifest(root);
+  const r = gen.writeVibeAgentFiles(root, m);
+  eq(r.written.join(","), "one");
+  eq(r.removed.join(","), "zero");
+  const first = fs.readFileSync(path.join(root, "agents-vibe/one.toml"), "utf8");
+  gen.writeVibeAgentFiles(root, m);
+  eq(fs.readFileSync(path.join(root, "agents-vibe/one.toml"), "utf8"), first);
+  eq(fs.existsSync(path.join(root, "agents-vibe/zero.toml")), false);
+  clean(root);
+});
+
+test("writeVibeAgentFiles: failed entries are skipped, file untouched", () => {
+  const root = tmp();
+  w(root, "repos.json", JSON.stringify({ repos: [
+    { name: "bad", url: "https://github.com/x/y", description: "d", persona: "p" }]}));
+  w(root, "agents-vibe/bad.toml", "pre-existing");
+  const r = gen.writeVibeAgentFiles(root, gen.loadManifest(root), new Set(["bad"]));
+  eq(r.written.length, 0);
+  eq(fs.readFileSync(path.join(root, "agents-vibe/bad.toml"), "utf8"), "pre-existing");
   clean(root);
 });
 
@@ -286,13 +359,71 @@ test("status: exit rules incl. expected absence for zero-skill entries", () => {
   skill(root, "skills/one/a");
   gitRepo(path.join(root, "skills/one"));
   w(root, "agents/one.md", gen.renderAgentFile(manifest.repos[0], ["a"]));
+  const found = gen.discoverSkills(path.join(root, "skills/one"), manifest.repos[0]);
+  w(root, "agents-vibe/one.toml", gen.renderVibeAgentTOML(manifest.repos[0], found.skills));
   gitRepo(path.join(root, "skills/zero"));           // clone ok, no skills
   const r = gen.statusOf(root, manifest);
   eq(r.rows.length, 2);
   eq(r.rows.find(x => x.name === "zero").agent, "in-sync");
   eq(r.rows.find(x => x.name === "one").agent, "in-sync");
+  eq(r.rows.find(x => x.name === "one").vibe, "in-sync");
+  eq(r.rows.find(x => x.name === "zero").vibe, "—");
   eq(r.exitCode, 0);
   clean(root);
+});
+
+test("status: zero-skill leftover TOML is stale and fails exit", () => {
+  const root = tmp();
+  const manifest = { repos: [
+    { name: "one", url: "https://github.com/x/y", description: "d", persona: "p" },
+    { name: "zero", url: "https://github.com/x/y", description: "d", persona: "p" },
+  ]};
+  w(root, "repos.json", JSON.stringify(manifest));
+  skill(root, "skills/one/a");
+  gitRepo(path.join(root, "skills/one"));
+  w(root, "agents/one.md", gen.renderAgentFile(manifest.repos[0], ["a"]));
+  const found = gen.discoverSkills(path.join(root, "skills/one"), manifest.repos[0]);
+  w(root, "agents-vibe/one.toml", gen.renderVibeAgentTOML(manifest.repos[0], found.skills));
+  gitRepo(path.join(root, "skills/zero"));
+  w(root, "agents-vibe/zero.toml", "leftover");
+  const r = gen.statusOf(root, manifest);
+  eq(r.rows.find(x => x.name === "zero").vibe, "stale");
+  eq(r.rows.find(x => x.name === "one").agent, "in-sync");
+  eq(r.exitCode, 1);
+  clean(root);
+});
+
+test("status: only-vibe-stale forces exit 1", () => {
+  const root = tmp();
+  const manifest = { repos: [
+    { name: "one", url: "https://github.com/x/y", description: "d", persona: "p" }]};
+  w(root, "repos.json", JSON.stringify(manifest));
+  skill(root, "skills/one/a");
+  gitRepo(path.join(root, "skills/one"));
+  w(root, "agents/one.md", gen.renderAgentFile(manifest.repos[0], ["a"]));
+  w(root, "agents-vibe/one.toml", "tampered");
+  const r = gen.statusOf(root, manifest);
+  eq(r.rows[0].agent, "in-sync");
+  eq(r.rows[0].vibe, "stale");
+  eq(r.exitCode, 1);
+  clean(root);
+});
+
+test("status: name collision with user agents dir is a warning, not an exit", () => {
+  const root = tmp(); const ua = tmp();
+  const manifest = { repos: [
+    { name: "one", url: "https://github.com/x/y", description: "d", persona: "p" }]};
+  w(root, "repos.json", JSON.stringify(manifest));
+  skill(root, "skills/one/a");
+  gitRepo(path.join(root, "skills/one"));
+  w(root, "agents/one.md", gen.renderAgentFile(manifest.repos[0], ["a"]));
+  const found = gen.discoverSkills(path.join(root, "skills/one"), manifest.repos[0]);
+  w(root, "agents-vibe/one.toml", gen.renderVibeAgentTOML(manifest.repos[0], found.skills));
+  w(ua, "one.toml", "user agent");
+  const r = gen.statusOf(root, manifest, { userAgentsDir: ua });
+  eq(r.warnings.some(x => /one.*collision/.test(x)), true);
+  eq(r.exitCode, 0);
+  clean(root); clean(ua);
 });
 
 test("status: stale, missing, dirty, not-a-repo, missing-clone all flagged", () => {
@@ -344,7 +475,7 @@ test("install: clones, generates, prunes, merges settings; clone failure flagged
     { name: "b", url: "file://" + path.join(root, "nope.git"), description: "d", persona: "p" },
   ]}));
   w(root, "agents/orphan.md", "---\nname: orphan\nskillPath: ../skills/orphan\n---\nx\n");
-  const r = gen.runInstall(root, sp);
+  const r = gen.runInstall(root, sp, path.join(root, "config.toml"));
   eq(r.exitCode, 1);                                    // entry b failed
   eq(fs.existsSync(path.join(root, "skills/a/skills/one/SKILL.md")), true);
   eq(fs.readFileSync(path.join(root, "agents/a.md"), "utf8"),
@@ -362,7 +493,7 @@ test("install: not-a-repo clone dir is removed and re-cloned", () => {
   w(root, "skills/a/junk.txt", "interrupted clone");
   w(root, "repos.json", JSON.stringify({ repos: [
     { name: "a", url: remote.url, description: "d", persona: "p" }]}));
-  const r = gen.runInstall(root, path.join(root, "settings.json"));
+  const r = gen.runInstall(root, path.join(root, "settings.json"), path.join(root, "config.toml"));
   eq(r.exitCode, 0);
   eq(fs.existsSync(path.join(root, "skills/a/.git")), true);
   eq(fs.existsSync(path.join(root, "skills/a/junk.txt")), false);
@@ -371,14 +502,15 @@ test("install: not-a-repo clone dir is removed and re-cloned", () => {
 
 test("update: pull --ff-only picks up new skills and reports deltas", () => {
   const root = tmp(); const sp = path.join(root, "settings.json");
+  const vp = path.join(root, "config.toml");
   const remote = bareRemote(root); remote.add(path.join("skills", "one"), "one");
   w(root, "repos.json", JSON.stringify({ repos: [
     { name: "a", url: remote.url, description: "d", persona: "p" }]}));
-  eq(gen.runInstall(root, sp).exitCode, 0);
+  eq(gen.runInstall(root, sp, vp).exitCode, 0);
   remote.add(path.join("skills", "two"), "two");
-  const r = gen.runUpdate(root, sp);
+  const r = gen.runUpdate(root, sp, vp);
   eq(r.exitCode, 0);
-  eq(r.report.some(l => /a: \+1 \(two\)/.test(l)), true);
+  eq(r.report.filter(l => /a: \+1 \(two\)/.test(l)).length, 1);
   eq(fs.readFileSync(path.join(root, "agents/a.md"), "utf8"),
      gen.renderAgentFile({ name: "a", description: "d", persona: "p" }, ["one", "two"]));
   clean(root);
@@ -389,11 +521,11 @@ test("update: non-ff remote is warned and left as-is, exit non-zero", () => {
   const remote = bareRemote(root); remote.add(path.join("skills", "one"), "one");
   w(root, "repos.json", JSON.stringify({ repos: [
     { name: "a", url: remote.url, description: "d", persona: "p" }]}));
-  eq(gen.runInstall(root, sp).exitCode, 0);
+  eq(gen.runInstall(root, sp, path.join(root, "config.toml")).exitCode, 0);
   // rewrite remote history: amend + force push makes local pull non-ff
   spawnSync("git", ["-C", path.join(root, "work"), "commit", "--amend", "-q", "-m", "rewritten"]);
   spawnSync("git", ["-C", path.join(root, "work"), "push", "-q", "-f", "origin", "HEAD"]);
-  const r = gen.runUpdate(root, sp);
+  const r = gen.runUpdate(root, sp, path.join(root, "config.toml"));
   eq(r.exitCode, 1);
   eq(r.report.some(l => /pull failed/.test(l)), true);
   eq(fs.existsSync(path.join(root, "skills/a/.git")), true);   // clone untouched
@@ -405,9 +537,9 @@ test("install: reused clone reported dirty when locally modified", () => {
   remote.add(path.join("skills", "one"), "one");
   w(root, "repos.json", JSON.stringify({ repos: [
     { name: "a", url: remote.url, description: "d", persona: "p" }]}));
-  gen.runInstall(root, path.join(root, "settings.json"));
+  gen.runInstall(root, path.join(root, "settings.json"), path.join(root, "config.toml"));
   w(root, "skills/a/local-change.txt", "x");
-  const r = gen.runInstall(root, path.join(root, "settings.json"));
+  const r = gen.runInstall(root, path.join(root, "settings.json"), path.join(root, "config.toml"));
   eq(r.report.some(l => /reused \(dirty\)/.test(l)), true);
   eq(r.exitCode, 0);
   clean(root);
@@ -441,6 +573,48 @@ test("renderAgentFile: multi-line description is escaped into one YAML line", ()
   eq(out.split("\n")[2], 'description: "line1\\nline2"');
 });
 
+test("renderVibeAgentTOML: exact bytes, one skill with description", () => {
+  const entry = { name: "x", description: `Says "no"`, persona: "You are X." };
+  const dir = "/abs/root/skills/x/core";
+  eq(gen.renderVibeAgentTOML(entry, [{ name: "core", dir, description: "does things" }]),
+`agent_type = "subagent"
+description = "Says \\"no\\""
+disabled_tools = ["skill"]
+instructions = """
+You are X.
+
+${gen.VIBE_BOILERPLATE}
+
+- core: does things — /abs/root/skills/x/core/SKILL.md
+"""
+`);
+});
+
+test("renderVibeAgentTOML: name-only row when description null, multiple rows", () => {
+  const entry = { name: "x", description: "d", persona: "p" };
+  const out = gen.renderVibeAgentTOML(entry, [
+    { name: "a", dir: "/r/a", description: null },
+    { name: "b", dir: "/r/b", description: "desc b" },
+  ]);
+  eq(out.includes("- a — /r/a/SKILL.md\n- b: desc b — /r/b/SKILL.md"), true);
+});
+
+test("renderVibeAgentTOML: escaping survives quotes, backslashes, and triple quotes", () => {
+  const entry = { name: "x", description: 'd\\"q', persona: 'Ends with quote " and """ triple' };
+  const out = gen.renderVibeAgentTOML(entry, [{ name: "a", dir: "/r/a", description: null }]);
+  eq(out.startsWith(`agent_type = "subagent"\ndescription = "d\\\\\\"q"`), true);
+  eq(out.includes('quote \\" and \\"\\"\\" triple'), true);
+  const body = out.slice(out.indexOf('instructions = """') + 18, out.lastIndexOf('"""'));
+  eq(body.includes('"""'), false);   // no unescaped terminator inside the body
+});
+
+test("renderVibeAgentTOML: CRLF persona is normalized, no \\r in output", () => {
+  const out = gen.renderVibeAgentTOML(
+    { name: "x", description: "d", persona: "line1\r\nline2" }, []);
+  eq(out.includes("\r"), false);
+  eq(out.includes("line1\nline2"), true);
+});
+
 test("install: clone failure leaves pre-existing agent file untouched", () => {
   const root = tmp(); const sp = path.join(root, "settings.json");
   const remote = bareRemote(root); remote.add(path.join("skills", "one"), "one");
@@ -449,9 +623,74 @@ test("install: clone failure leaves pre-existing agent file untouched", () => {
     { name: "b", url: "file://" + path.join(root, "nope.git"), description: "d", persona: "p" },
   ]}));
   w(root, "agents/b.md", "previously generated agent");
-  const r = gen.runInstall(root, sp);
+  const r = gen.runInstall(root, sp, path.join(root, "config.toml"));
   eq(r.exitCode, 1);
   eq(fs.readFileSync(path.join(root, "agents/b.md"), "utf8"), "previously generated agent");
+  clean(root);
+});
+
+test("install: writes both targets, wires both settings", () => {
+  const root = tmp(); const sp = path.join(root, "settings.json");
+  const vp = path.join(root, "config.toml");
+  const remote = bareRemote(root); remote.add(path.join("skills", "one"), "one");
+  w(root, "repos.json", JSON.stringify({ repos: [
+    { name: "a", url: remote.url, description: "d", persona: "p" },
+    { name: "b", url: "file://" + path.join(root, "nope.git"), description: "d", persona: "p" },
+  ]}));
+  const r = gen.runInstall(root, sp, vp);
+  eq(r.exitCode, 1);                                    // entry b failed
+  const found = gen.discoverSkills(path.join(root, "skills/a"), { name: "a", description: "d", persona: "p" });
+  eq(fs.readFileSync(path.join(root, "agents-vibe/a.toml"), "utf8"),
+    gen.renderVibeAgentTOML({ name: "a", description: "d", persona: "p" }, found.skills));
+  const cfg = fs.readFileSync(vp, "utf8");
+  eq(cfg.includes(`agent_paths = ["${path.join(root, "agents-vibe")}"]`), true);
+  eq(cfg.includes(`allowlist = ["${path.join(root, "skills")}/*"`), true);
+  eq(JSON.parse(fs.readFileSync(sp, "utf8")).subagents.agentScanDirs[0], path.join(root, "agents"));
+  clean(root);
+});
+
+test("install: clone failure leaves pre-existing vibe TOML untouched", () => {
+  const root = tmp(); const sp = path.join(root, "settings.json");
+  const remote = bareRemote(root); remote.add(path.join("skills", "one"), "one");
+  w(root, "repos.json", JSON.stringify({ repos: [
+    { name: "a", url: remote.url, description: "d", persona: "p" },
+    { name: "b", url: "file://" + path.join(root, "nope.git"), description: "d", persona: "p" },
+  ]}));
+  w(root, "agents-vibe/b.toml", "pre-existing");
+  const r = gen.runInstall(root, sp, path.join(root, "config.toml"));
+  eq(r.exitCode, 1);
+  eq(fs.readFileSync(path.join(root, "agents-vibe/b.toml"), "utf8"), "pre-existing");
+  clean(root);
+});
+
+test("install: vibe config bail is report-only", () => {
+  const root = tmp(); const sp = path.join(root, "settings.json");
+  const vp = path.join(root, "config.toml");
+  const remote = bareRemote(root); remote.add(path.join("skills", "one"), "one");
+  w(root, "repos.json", JSON.stringify({ repos: [
+    { name: "a", url: remote.url, description: "d", persona: "p" }]}));
+  w(root, "config.toml", 'agent_paths = [\n  "/other",\n]\n');
+  const r = gen.runInstall(root, sp, vp);
+  eq(r.exitCode, 0);
+  const skipped = r.report.filter(l => /vibe config: agent_paths skipped/.test(l));
+  eq(skipped.length, 1);
+  eq(/add "/.test(skipped[0]), true);
+  clean(root);
+});
+
+test("install: report mentions both targets and prints reminders", () => {
+  const root = tmp(); const sp = path.join(root, "settings.json");
+  const vp = path.join(root, "config.toml");
+  const remote = bareRemote(root); remote.add(path.join("skills", "one"), "one");
+  w(root, "repos.json", JSON.stringify({ repos: [
+    { name: "a", url: remote.url, description: "d", persona: "p" }]}));
+  const r = gen.runInstall(root, sp, vp);
+  eq(r.exitCode, 0);
+  eq(r.report.some(l => /a: cloned, 1 skills, agent written \(pi, vibe\)/.test(l)), true);
+  eq(r.report.some(l => /vibe config: agent_paths added/.test(l)), true);
+  eq(r.report.some(l => /vibe config: allowlist added/.test(l)), true);
+  eq(r.report.includes("reminder: run /reload (or restart Vibe) to pick up new agents"), true);
+  eq(r.report.includes("reminder: enabled_agents / disabled_agents config filters override agent discovery"), true);
   clean(root);
 });
 
@@ -511,7 +750,7 @@ test("install: unparseable settings reports only the skipped line", () => {
   w(root, "repos.json", JSON.stringify({ repos: [
     { name: "a", url: remote.url, description: "d", persona: "p" }]}));
   w(root, "settings.json", "{ not json");
-  const r = gen.runInstall(root, sp);
+  const r = gen.runInstall(root, sp, path.join(root, "config.toml"));
   eq(r.exitCode, 0);
   eq(r.report.filter(l => l.startsWith("settings:")).length, 1);
   eq(/skipped/.test(r.report.find(l => l.startsWith("settings:"))), true);
@@ -557,12 +796,12 @@ test("update: changed manifest url re-clones from the new remote", () => {
   const rb = bareRemote(tmp()); rb.add(path.join("skills", "two"), "two");
   w(root, "repos.json", JSON.stringify({ repos: [
     { name: "a", url: ra.url, description: "d", persona: "p" }]}));
-  eq(gen.runInstall(root, sp).exitCode, 0);
+  eq(gen.runInstall(root, sp, path.join(root, "config.toml")).exitCode, 0);
   eq(fs.readFileSync(path.join(root, "agents/a.md"), "utf8"),
      gen.renderAgentFile({ name: "a", description: "d", persona: "p" }, ["one"]));
   w(root, "repos.json", JSON.stringify({ repos: [
     { name: "a", url: rb.url, description: "d", persona: "p" }]}));
-  const r = gen.runUpdate(root, sp);
+  const r = gen.runUpdate(root, sp, path.join(root, "config.toml"));
   eq(r.exitCode, 0);
   eq(r.report.some(l => /url changed/.test(l)), true);
   eq(fs.readFileSync(path.join(root, "agents/a.md"), "utf8"),
@@ -583,6 +822,309 @@ test("mergeSettings: .bak is replaced atomically, not written through a symlink"
   clean(root);
 });
 
+// The [tools.read_file] allowlist entries the generator ensures: Vibe matches
+// absolute allowlist patterns with component-strict pathlib rules, so a single
+// `**` matches nothing — the generator emits one pattern per depth, 1..8.
+const allowPatterns = (root) =>
+  Array.from({ length: 8 }, (_, i) => `${root}/skills${"/*".repeat(i + 1)}`);
+const allowLine = (root, extra = []) =>
+  `allowlist = [${[...extra, ...allowPatterns(root)].map(p => `"${p}"`).join(", ")}]`;
+
+test("mergeVibeConfig: missing file is created with agent_paths and the allowlist table", () => {
+  const root = tmp();
+  const sp = path.join(root, "nested", "dir", "config.toml");
+  const r = gen.mergeVibeConfig(sp, root);
+  eq(r.agentPaths.changed, true);
+  eq(r.allowlist.changed, true);
+  eq(fs.readFileSync(sp, "utf8"),
+    `agent_paths = ["${root}/agents-vibe"]\n\n[tools.read_file]\n${allowLine(root)}\n`);
+  eq(fs.existsSync(sp + ".bak"), false);
+  clean(root);
+});
+
+test("mergeVibeConfig: absent key inserted before the first table, below BOM", () => {
+  const root = tmp(); const sp = path.join(root, "config.toml");
+  w(root, "config.toml", "\uFEFF# top comment\n[tools.bash]\nallowlist = []\n");
+  const r = gen.mergeVibeConfig(sp, root);
+  eq(r.agentPaths.changed, true);
+  const lines = fs.readFileSync(sp, "utf8").replace(/^\uFEFF/, "").split("\n");
+  eq(lines[0], `agent_paths = ["${root}/agents-vibe"]`);
+  eq(lines[1], "# top comment");
+  eq(lines[2], "[tools.bash]");
+  clean(root);
+});
+
+test("mergeVibeConfig: absent key + no tables appends at EOF; missing trailing newline tolerated", () => {
+  const root = tmp(); const sp = path.join(root, "config.toml");
+  w(root, "config.toml", 'active_model = "x"');
+  const r = gen.mergeVibeConfig(sp, root);
+  eq(r.agentPaths.changed, true);
+  eq(fs.readFileSync(sp, "utf8"),
+    `active_model = "x"\nagent_paths = ["${root}/agents-vibe"]\n\n[tools.read_file]\n${allowLine(root)}\n`);
+  clean(root);
+});
+
+test("mergeVibeConfig: absent key + indented and [[x]] headers still bound the region", () => {
+  const root = tmp(); const sp = path.join(root, "config.toml");
+  w(root, "config.toml", "  [a.b]\nx = 1\n[[c]]\ny = 2\n");
+  const r = gen.mergeVibeConfig(sp, root);
+  eq(r.agentPaths.changed, true);
+  const lines = fs.readFileSync(sp, "utf8").split("\n");
+  eq(lines[0], `agent_paths = ["${root}/agents-vibe"]`);
+  eq(lines[1], "  [a.b]");
+  clean(root);
+});
+
+test("mergeVibeConfig: single-line array merged, idempotent, .bak written", () => {
+  for (const line of [
+    'agent_paths = ["/other"]',
+    'agent_paths=["/other"]',
+    "agent_paths = ['/other']",
+    'agent_paths = ["/other",]',
+  ]) {
+    const root = tmp(); const sp = path.join(root, "config.toml");
+    const before = `${line}\n`;
+    w(root, "config.toml", before);
+    const r1 = gen.mergeVibeConfig(sp, root);
+    eq(r1.agentPaths.changed, true, line);
+    const after = `agent_paths = ["/other", "${root}/agents-vibe"]\n\n[tools.read_file]\n${allowLine(root)}\n`;
+    eq(fs.readFileSync(sp, "utf8"), after, line);
+    eq(fs.readFileSync(sp + ".bak", "utf8"), before, line);
+    const r2 = gen.mergeVibeConfig(sp, root);
+    eq(r2.agentPaths.changed, false, line);
+    eq(fs.readFileSync(sp, "utf8"), after, line);
+    clean(root);
+  }
+});
+
+test("mergeVibeConfig: agent_paths under a sub-table is invisible, never edited", () => {
+  const root = tmp(); const sp = path.join(root, "config.toml");
+  w(root, "config.toml", '[foo]\nagent_paths = ["/other"]\n');
+  const r = gen.mergeVibeConfig(sp, root);
+  eq(r.agentPaths.changed, true);
+  eq(fs.readFileSync(sp, "utf8"),
+    `agent_paths = ["${root}/agents-vibe"]\n[foo]\nagent_paths = ["/other"]\n\n[tools.read_file]\n${allowLine(root)}\n`);
+  clean(root);
+});
+
+test("mergeVibeConfig: multi-line array, inline comment, non-array value, duplicate keys all safe-bail", () => {
+  const cases = [
+    'agent_paths = [\n  "/other",\n]\n',
+    'agent_paths = ["/other"] # mine\n',
+    'agent_paths = "/other"\n',
+    'agent_paths = ["/a"]\nagent_paths = ["/b"]\n',
+  ];
+  for (const head of cases) {
+    const root = tmp(); const sp = path.join(root, "config.toml");
+    // allowlist duty pre-satisfied so the fixture pins the agent_paths bail alone
+    const before = `${head}\n[tools.read_file]\n${allowLine(root)}\n`;
+    w(root, "config.toml", before);
+    const r = gen.mergeVibeConfig(sp, root);
+    eq(r.agentPaths.changed, false, head);
+    eq(fs.readFileSync(sp, "utf8"), before);
+    eq(fs.existsSync(sp + ".bak"), false, head);
+    eq(r.agentPaths.error.includes(`add "${root}/agents-vibe" to the agent_paths`), true, head);
+    clean(root);
+  }
+});
+
+test("mergeVibeConfig: any triple-quote string in the file forces safe-bail", () => {
+  const root = tmp(); const sp = path.join(root, "config.toml");
+  const before = 'instructions = """\nagent_paths = ["/fake"]\n"""\n';
+  w(root, "config.toml", before);
+  const r = gen.mergeVibeConfig(sp, root);
+  eq(r.agentPaths.changed, false);
+  eq(fs.readFileSync(sp, "utf8"), before);
+  eq(/unmergeable/.test(r.agentPaths.error), true);
+  clean(root);
+});
+
+test("mergeVibeConfig: CRLF file keeps CRLF on inserted lines", () => {
+  const root = tmp(); const sp = path.join(root, "config.toml");
+  w(root, "config.toml", "[tools.bash]\r\nallowlist = []\r\n");
+  const r = gen.mergeVibeConfig(sp, root);
+  eq(r.agentPaths.changed, true);
+  eq(fs.readFileSync(sp, "utf8"),
+    `agent_paths = ["${root}/agents-vibe"]\r\n[tools.bash]\r\nallowlist = []\r\n\r\n[tools.read_file]\r\n${allowLine(root)}\r\n`);
+  clean(root);
+});
+
+test("mergeVibeConfig: .bak replaced atomically, not written through a symlink", () => {
+  const root = tmp(); const sp = path.join(root, "config.toml");
+  w(root, "config.toml", 'active_model = "x"\n');
+  w(root, "victim.txt", "do not touch");
+  fs.symlinkSync(path.join(root, "victim.txt"), sp + ".bak");
+  const r = gen.mergeVibeConfig(sp, root);
+  eq(r.agentPaths.changed, true);
+  eq(fs.readFileSync(path.join(root, "victim.txt"), "utf8"), "do not touch");
+  eq(fs.lstatSync(sp + ".bak").isSymbolicLink(), false);
+  eq(fs.readFileSync(sp + ".bak", "utf8"), 'active_model = "x"\n');
+  clean(root);
+});
+
+test("mergeVibeConfig: absent allowlist table appended at EOF", () => {
+  const root = tmp(); const sp = path.join(root, "config.toml");
+  w(root, "config.toml", 'agent_paths = ["/other"]\n[other]\nx = 1\n');
+  const r = gen.mergeVibeConfig(sp, root);
+  eq(r.allowlist.changed, true);
+  eq(r.agentPaths.changed, true);
+  eq(fs.readFileSync(sp, "utf8"),
+    `agent_paths = ["/other", "${root}/agents-vibe"]\n[other]\nx = 1\n\n[tools.read_file]\n${allowLine(root)}\n`);
+  clean(root);
+});
+
+test("mergeVibeConfig: single-line allowlist merged, idempotent, .bak written once", () => {
+  const root = tmp(); const sp = path.join(root, "config.toml");
+  const before = '[tools.read_file]\nallowlist = ["/safe/**"]\n';
+  w(root, "config.toml", before);
+  const r1 = gen.mergeVibeConfig(sp, root);
+  eq(r1.allowlist.changed, true);
+  eq(r1.agentPaths.changed, true);
+  const after = `agent_paths = ["${root}/agents-vibe"]\n[tools.read_file]\n${allowLine(root, ["/safe/**"])}\n`;
+  eq(fs.readFileSync(sp, "utf8"), after);
+  eq(fs.readFileSync(sp + ".bak", "utf8"), before);
+  const r2 = gen.mergeVibeConfig(sp, root);
+  eq(r2.allowlist.changed, false);
+  eq(r2.agentPaths.changed, false);
+  eq(fs.readFileSync(sp, "utf8"), after);
+  clean(root);
+});
+
+test("mergeVibeConfig: dotted variant table forces bail with remedy", () => {
+  const root = tmp(); const sp = path.join(root, "config.toml");
+  const before = `agent_paths = ["${root}/agents-vibe"]\n[tools.read_file.sub]\nx = 1\n`;
+  w(root, "config.toml", before);
+  const r = gen.mergeVibeConfig(sp, root);
+  eq(r.allowlist.changed, false);
+  eq(r.agentPaths.changed, false);
+  eq(r.allowlist.error.includes(`add the depth patterns "${root}/skills/*"`), true);
+  eq(fs.readFileSync(sp, "utf8"), before);
+  clean(root);
+});
+
+test("mergeVibeConfig: multi-line allowlist or inline comment bails with remedy", () => {
+  for (const tail of [
+    '[tools.read_file]\nallowlist = [\n  "/safe/**",\n]\n',
+    '[tools.read_file]\nallowlist = ["/safe/**"] # mine\n',
+  ]) {
+    const root = tmp(); const sp = path.join(root, "config.toml");
+    const before = `agent_paths = ["${root}/agents-vibe"]\n${tail}`;
+    w(root, "config.toml", before);
+    const r = gen.mergeVibeConfig(sp, root);
+    eq(r.allowlist.changed, false, tail);
+    eq(r.allowlist.error.includes(`add the depth patterns "${root}/skills/*"`), true, tail);
+    eq(fs.readFileSync(sp, "utf8"), before);
+    eq(fs.existsSync(sp + ".bak"), false, tail);
+    clean(root);
+  }
+});
+
+test("mergeVibeConfig: table present with no allowlist key inserts under header, other keys preserved", () => {
+  const root = tmp(); const sp = path.join(root, "config.toml");
+  const before = `agent_paths = ["${root}/agents-vibe"]\n[tools.read_file]\npermission = "ask"\n`;
+  w(root, "config.toml", before);
+  const r = gen.mergeVibeConfig(sp, root);
+  eq(r.allowlist.changed, true);
+  eq(r.agentPaths.changed, false);
+  eq(fs.readFileSync(sp, "utf8"),
+    `agent_paths = ["${root}/agents-vibe"]\n[tools.read_file]\n${allowLine(root)}\npermission = "ask"\n`);
+  clean(root);
+});
+
+test("mergeVibeConfig: unrecognized [tools.read_file] forms never duplicate the table", () => {
+  for (const tail of [
+    "[[tools.read_file]]\n",
+    "[tools.read_file.sub]\n",
+    'tools.read_file.allowlist = ["/x/**"]\n',
+    '[tools]\nread_file.allowlist = ["/x/**"]\n',
+    'tools = { read_file = { allowlist = ["/x/**"] } }\n',
+  ]) {
+    const root = tmp(); const sp = path.join(root, "config.toml");
+    const before = `agent_paths = ["${root}/agents-vibe"]\n${tail}`;
+    w(root, "config.toml", before);
+    const r = gen.mergeVibeConfig(sp, root);
+    eq(r.allowlist.changed, false, tail);
+    eq(r.allowlist.error.includes(`add the depth patterns "${root}/skills/*"`), true, tail);
+    eq(fs.readFileSync(sp, "utf8"), before);
+    eq(fs.existsSync(sp + ".bak"), false, tail);
+    clean(root);
+  }
+});
+
+test("mergeVibeConfig: recognized [tools.read_file] header variants merge without duplication", () => {
+  for (const header of [
+    "[ tools.read_file ]\n",
+    '[tools."read_file"]\n',
+    "[tools.read_file] # overrides\n",
+  ]) {
+    const root = tmp(); const sp = path.join(root, "config.toml");
+    const before = `agent_paths = ["${root}/agents-vibe"]\n${header}`;
+    w(root, "config.toml", before);
+    const r = gen.mergeVibeConfig(sp, root);
+    eq(r.agentPaths.changed, false, header);
+    eq(r.allowlist.changed, true, header);
+    eq(fs.readFileSync(sp, "utf8"), `${before}${allowLine(root)}\n`, header);
+    clean(root);
+  }
+});
+
+test("mergeVibeConfig: populated multi-line array with bracket-initial continuation is not a header", () => {
+  const root = tmp(); const sp = path.join(root, "config.toml");
+  const before = 'theme = ["dark",\n  ["light"]]\n';
+  w(root, "config.toml", before);
+  const r = gen.mergeVibeConfig(sp, root);
+  eq(r.agentPaths.changed, false);
+  eq(r.allowlist.changed, false);
+  eq(fs.readFileSync(sp, "utf8"), before);
+  eq(fs.existsSync(sp + ".bak"), false);
+  eq(r.agentPaths.error.includes(`add "${root}/agents-vibe" to the agent_paths`), true);
+  eq(r.allowlist.error.includes(`add the depth patterns "${root}/skills/*"`), true);
+  clean(root);
+});
+
+test("mergeVibeConfig: unclosed array opener anywhere forces safe-bail", () => {
+  for (const withPaths of [true, false]) {
+    const root = tmp(); const sp = path.join(root, "config.toml");
+    const before = (withPaths ? `agent_paths = ["${root}/agents-vibe"]\n` : "")
+      + 'theme = [\n  ["dark"],\n]\n';
+    w(root, "config.toml", before);
+    const r = gen.mergeVibeConfig(sp, root);
+    eq(r.agentPaths.changed, false, String(withPaths));
+    eq(r.allowlist.changed, false, String(withPaths));
+    eq(fs.readFileSync(sp, "utf8"), before);
+    eq(fs.existsSync(sp + ".bak"), false, String(withPaths));
+    eq(r.agentPaths.error.includes(`add "${root}/agents-vibe" to the agent_paths`), true, String(withPaths));
+    eq(r.allowlist.error.includes(`add the depth patterns "${root}/skills/*"`), true, String(withPaths));
+    clean(root);
+  }
+});
+
+test("mergeVibeConfig: suspicious escape in an existing element bails; legit escapes merge", () => {
+  {
+    const root = tmp(); const sp = path.join(root, "config.toml");
+    const before = 'agent_paths = ["/a\\u0020b"]\n';
+    w(root, "config.toml", before);
+    const r = gen.mergeVibeConfig(sp, root);
+    eq(r.agentPaths.changed, false);
+    // the suspicious element is never edited or re-rendered; the independent
+    // allowlist duty still appends its table without touching that line
+    const out = fs.readFileSync(sp, "utf8");
+    eq(out.startsWith('agent_paths = ["/a\\u0020b"]\n\n[tools.read_file]\n'), true);
+    eq(out.includes(allowLine(root)), true);
+    eq(r.agentPaths.error.includes(`add "${root}/agents-vibe" to the agent_paths`), true);
+    clean(root);
+  }
+  {
+    const root = tmp(); const sp = path.join(root, "config.toml");
+    w(root, "config.toml", 'agent_paths = ["/a\\"b"]\n');
+    const r = gen.mergeVibeConfig(sp, root);
+    eq(r.agentPaths.changed, true);
+    eq(fs.readFileSync(sp, "utf8"),
+      `agent_paths = ["/a\\"b", "${root}/agents-vibe"]\n\n[tools.read_file]\n${allowLine(root)}\n`);
+    clean(root);
+  }
+});
+
 test("prune: only generated agent files are pruned, user files survive", () => {
   const root = tmp();
   w(root, "repos.json", JSON.stringify({ repos: [
@@ -594,6 +1136,21 @@ test("prune: only generated agent files are pruned, user files survive", () => {
   eq(r.agents.join(","), "orphan");
   eq(fs.existsSync(path.join(root, "agents/myown.md")), true);
   eq(fs.existsSync(path.join(root, "agents/orphan.md")), false);
+  clean(root);
+});
+
+test("prune: generated vibe TOMLs removed by marker, user files survive", () => {
+  const root = tmp();
+  w(root, "repos.json", JSON.stringify({ repos: [
+    { name: "one", url: "https://github.com/x/y", description: "d", persona: "p" }]}));
+  const generated = gen.renderVibeAgentTOML({ name: "orphan", description: "d", persona: "p" },
+    [{ name: "a", dir: "/r/a", description: null }]);
+  w(root, "agents-vibe/orphan.toml", generated);
+  w(root, "agents-vibe/myown.toml", 'agent_type = "subagent"\ndescription = "mine"\n');
+  const r = gen.prune(root, gen.loadManifest(root));
+  eq(r.vibeAgents.join(","), "orphan");
+  eq(fs.existsSync(path.join(root, "agents-vibe/orphan.toml")), false);
+  eq(fs.existsSync(path.join(root, "agents-vibe/myown.toml")), true);
   clean(root);
 });
 
