@@ -16,9 +16,17 @@ The pinned upstream projects and their licenses are listed in
 ./install.sh status    # read-only health table
 ```
 
-Then run `/reload` in pi (or restart it) so the new agents are discovered.
-Launch one from any project with the `subagent` tool, e.g. agent
-`humanizer` or agent `superpowers`.
+Then:
+
+- **pi**: run `/reload` (or restart it) so the new agents are discovered;
+  launch one from any project with the `subagent` tool, e.g. agent
+  `humanizer` or agent `superpowers`.
+- **Vibe**: run `/reload` (or restart it) so the config and agent TOMLs
+  are re-read; the model can then spawn the subagents from any project
+  (their `description` is the routing signal). If the generator printed
+  a manual remedy for your `~/.vibe/config.toml`, apply that line once —
+  it means your config's formatting is one the safe-bail envelope refuses
+  to edit.
 
 ## How it works
 
@@ -61,7 +69,8 @@ Launch one from any project with the `subagent` tool, e.g. agent
 
 Edit `repos.json` and rerun `./install.sh update`:
 
-- `description` — the one-liner shown in pi's agent catalog.
+- `description` — the one-liner shown in pi's agent catalog and the
+  spawn-routing signal for the Vibe subagent.
 - `persona` — the generated agent's system prompt body.
 - `skillSource` — scan a subdirectory instead of the repo root, for repos
   that ship the same skill in many tool-specific bundles (e.g.
@@ -92,7 +101,9 @@ rm -rf agents agents-vibe skills      # generated artifacts + clones
 # remove the "~/repositories/skill-router/agents" entry from
 # ~/.pi/agent/settings.json -> subagents.agentScanDirs
 # and, from ~/.vibe/config.toml: the agents-vibe entry in agent_paths
-# and the skills/** entry in [tools.read_file] -> allowlist
+# and the skills depth-pattern entries (skills/* .. skills/*x8) in
+# [tools.read_file] -> allowlist
+git config --unset core.hooksPath     # optional: disables the pre-commit hook
 ```
 
 ## Tests
