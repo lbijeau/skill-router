@@ -1025,9 +1025,11 @@ test("mergeVibeConfig: table present with no allowlist key inserts under header,
 
 test("mergeVibeConfig: unrecognized [tools.read_file] forms never duplicate the table", () => {
   for (const tail of [
-    "[tools.read_file] # my overrides\n",
     "[[tools.read_file]]\n",
+    "[tools.read_file.sub]\n",
     'tools.read_file.allowlist = ["/x/**"]\n',
+    '[tools]\nread_file.allowlist = ["/x/**"]\n',
+    'tools = { read_file = { allowlist = ["/x/**"] } }\n',
   ]) {
     const root = tmp(); const sp = path.join(root, "config.toml");
     const before = `agent_paths = ["${root}/agents-vibe"]\n${tail}`;
@@ -1039,6 +1041,37 @@ test("mergeVibeConfig: unrecognized [tools.read_file] forms never duplicate the 
     eq(fs.existsSync(sp + ".bak"), false, tail);
     clean(root);
   }
+});
+
+test("mergeVibeConfig: recognized [tools.read_file] header variants merge without duplication", () => {
+  for (const header of [
+    "[ tools.read_file ]\n",
+    '[tools."read_file"]\n',
+    "[tools.read_file] # overrides\n",
+  ]) {
+    const root = tmp(); const sp = path.join(root, "config.toml");
+    const before = `agent_paths = ["${root}/agents-vibe"]\n${header}`;
+    w(root, "config.toml", before);
+    const r = gen.mergeVibeConfig(sp, root);
+    eq(r.agentPaths.changed, false, header);
+    eq(r.allowlist.changed, true, header);
+    eq(fs.readFileSync(sp, "utf8"), `${before}allowlist = ["${root}/skills/**"]\n`, header);
+    clean(root);
+  }
+});
+
+test("mergeVibeConfig: populated multi-line array with bracket-initial continuation is not a header", () => {
+  const root = tmp(); const sp = path.join(root, "config.toml");
+  const before = 'theme = ["dark",\n  ["light"]]\n';
+  w(root, "config.toml", before);
+  const r = gen.mergeVibeConfig(sp, root);
+  eq(r.agentPaths.changed, false);
+  eq(r.allowlist.changed, false);
+  eq(fs.readFileSync(sp, "utf8"), before);
+  eq(fs.existsSync(sp + ".bak"), false);
+  eq(r.agentPaths.error.includes(`add "${root}/agents-vibe" to the agent_paths`), true);
+  eq(r.allowlist.error.includes(`add "${root}/skills/**" to the allowlist`), true);
+  clean(root);
 });
 
 test("mergeVibeConfig: unclosed array opener anywhere forces safe-bail", () => {

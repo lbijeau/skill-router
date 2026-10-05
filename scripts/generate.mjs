@@ -483,7 +483,10 @@ export function mergeVibeConfig(configPath, repoRoot) {
     return result;
   }
 
-  if (parsed.lines.some(l => /=\s*\[\s*$/.test(l))) {
+  // Conservative on purpose: a trailing comma or an empty array opener means a
+  // multi-line array whose continuation lines can defeat the line grammar
+  // (a bracket-initial element looks like a table header). Refuse, don't guess.
+  if (parsed.lines.some(l => /=\s*\[\s*$/.test(l) || l.trimEnd().endsWith(","))) {
     result.agentPaths = { changed: false, error: agentErr };
     result.allowlist = { changed: false, error: allowErr };
     return result;
@@ -529,10 +532,19 @@ export function mergeVibeConfig(configPath, repoRoot) {
     }
   }
 
-  const exactHeader = lines.findIndex(l => /^\s*\[tools\.read_file\]\s*$/.test(l));
-  const looseReadFile = lines.some(l =>
-    /^\s*(?:\[\[?tools\.read_file|tools\.read_file)/.test(l));
-  if (exactHeader === -1 && looseReadFile) {
+  // Recognized header spellings (inner whitespace, quoted key, trailing
+  // comment) are merged under; anything else that mentions tools.read_file
+  // (array-of-tables, sub-tables, dotted keys, keys under [tools], inline
+  // tables) is refused rather than risked.
+  const readFileHeaderRe = /^\s*\[\s*tools\s*\.\s*["']?read_file["']?\s*\]\s*(?:#.*)?$/;
+  const exactHeader = lines.findIndex(l => readFileHeaderRe.test(l));
+  const looseReadFile = exactHeader === -1 && lines.some(l =>
+    (/^\s*\[/.test(l) && /tools\s*\.\s*["']?read_file/.test(l))
+    || /^\s*["']?tools\s*\.\s*["']?read_file/.test(l)
+    || /^\s*["']?read_file\s*[.=]/.test(l)
+    || /tools\s*=\s*\{/.test(l)
+    || /read_file\s*=\s*\{/.test(l));
+  if (looseReadFile) {
     result.allowlist = { changed: false, error: allowErr };
   } else if (exactHeader === -1) {
     if (lines[lines.length - 1] !== "") lines.push("");
