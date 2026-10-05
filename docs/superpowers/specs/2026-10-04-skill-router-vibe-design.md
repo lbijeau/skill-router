@@ -410,6 +410,37 @@ If (2) fails, the fallback is prompt-level isolation (weaker) or
 dropping the Vibe target until Vibe gains per-agent skill scoping; the
 decision gets recorded here, not papered over.
 
+## Validation results (2026-10-04, live install, unified harness v2.25.8)
+
+Validated against a real Vibe session in an unrelated project
+(`planetron`), driven via Herdr pane control; config entries applied
+manually per the remedy (the generator correctly refused this
+pretty-printed, multi-line-array config — the envelope held on first
+contact with a hostile-to-line-grammar file).
+
+| # | Assumption | Result |
+|---|---|---|
+| 1 | `agent_paths` discovery | **Pass** — all 9 subagents listed with their manifest descriptions; `graphify` correctly absent; empty `enabled_agents`/`disabled_agents` did not filter |
+| 2 | `disabled_tools = ["skill"]` honored | **Pass, with nuance** — the skill tool remains *visible* in the child's schema, but an actual load attempt returned `tool_denied`; the seal holds at invocation |
+| 3 | Permission wall | **Finding** — the child's clone `SKILL.md` read triggered an outside-workdir approval prompt in the parent UI *despite* `[tools.read_file] permission = "always"` **and** the generated allowlist entry. The unified harness exposes the tool as `file_system.read_file` (namespaced), and the `[tools.read_file]` config keys apparently do not bind to it. The allowlist mitigation as designed does **not** work on the unified harness; "Allow once" permitted the read |
+| 4 | Advertisement bleed | **Confirmed** — the child was told about parent-catalog skills in its prompt (in addition to its file-route skill). Pre-classified residual risk; isolation rests on the tool-route seal (which holds) |
+| 5 | `read_file` availability + truncation | **Pass** — full 397-line read (`was_truncated: false`), child disclosed byte counts unprompted |
+| 6 | Description routing | **Pass** — a natural rewrite task (no agent named) was spontaneously delegated to `humanizer` |
+| 7 | Routing fidelity | **Pass** — child read the right `SKILL.md` via its absolute path and its rewrite followed the skill |
+| 8 | TOML parser acceptance | **Pass** — `/reload` surfaced no config issues; all 9 TOMLs also parse under Python `tomllib` |
+
+Offline pre-validation: the generator's refusal behavior (bail + exact
+manual remedy + no write + no `.bak`) held against the real config; all
+generated TOMLs are strict-parser-valid; the folded-description pipeline
+renders the ponytail flagship artifact as designed.
+
+**Open decision (assumption 3):** on the unified harness, subagent skill
+reads surface a per-read approval prompt in the parent. Options: accept
+the prompts (each skill activation needs one Allow), find the config key
+that governs the namespaced `file_system.read_file` tool, or launch with
+`--add-dir` to pre-trust the clone tree. Until one lands, the allowlist
+duty is harmless but inert on the unified harness.
+
 ## Risks / unknowns
 
 - **Isolation strength**: the tool route is harness-enforced
