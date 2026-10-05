@@ -285,7 +285,7 @@ export function writeVibeAgentFiles(root, manifest, skip = new Set()) {
 }
 
 export function prune(root, manifest) {
-  const agents = [], clones = [];
+  const agents = [], clones = [], vibeAgents = [];
   const names = new Set(manifest.repos.map(e => e.name));
   const agentsDir = path.join(root, "agents");
   if (fs.existsSync(agentsDir)) {
@@ -304,6 +304,22 @@ export function prune(root, manifest) {
       }
     }
   }
+  const vibeDir = path.join(root, "agents-vibe");
+  if (fs.existsSync(vibeDir)) {
+    for (const f of fs.readdirSync(vibeDir)) {
+      const m = f.match(/^(.*)\.toml$/);
+      if (m && !names.has(m[1])) {
+        let generated = false;
+        try {
+          generated = fs.readFileSync(path.join(vibeDir, f), "utf8").includes(VIBE_MARKER);
+        } catch { /* unreadable: leave it alone */ }
+        if (generated) {
+          fs.rmSync(path.join(vibeDir, f));
+          vibeAgents.push(m[1]);
+        }
+      }
+    }
+  }
   const skillsDir = path.join(root, "skills");
   if (fs.existsSync(skillsDir)) {
     for (const d of fs.readdirSync(skillsDir, { withFileTypes: true })) {
@@ -313,7 +329,7 @@ export function prune(root, manifest) {
       }
     }
   }
-  return { agents, clones };
+  return { agents, clones, vibeAgents };
 }
 
 function expandTilde(p) {

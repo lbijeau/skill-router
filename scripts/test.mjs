@@ -913,6 +913,21 @@ test("prune: only generated agent files are pruned, user files survive", () => {
   clean(root);
 });
 
+test("prune: generated vibe TOMLs removed by marker, user files survive", () => {
+  const root = tmp();
+  w(root, "repos.json", JSON.stringify({ repos: [
+    { name: "one", url: "https://github.com/x/y", description: "d", persona: "p" }]}));
+  const generated = gen.renderVibeAgentTOML({ name: "orphan", description: "d", persona: "p" },
+    [{ name: "a", dir: "/r/a", description: null }]);
+  w(root, "agents-vibe/orphan.toml", generated);
+  w(root, "agents-vibe/myown.toml", 'agent_type = "subagent"\ndescription = "mine"\n');
+  const r = gen.prune(root, gen.loadManifest(root));
+  eq(r.vibeAgents.join(","), "orphan");
+  eq(fs.existsSync(path.join(root, "agents-vibe/orphan.toml")), false);
+  eq(fs.existsSync(path.join(root, "agents-vibe/myown.toml")), true);
+  clean(root);
+});
+
 process.exitCode = await (async () => {
   let failed = 0;
   for (const t of tests) {
