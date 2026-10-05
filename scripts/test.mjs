@@ -698,13 +698,14 @@ test("mergeSettings: .bak is replaced atomically, not written through a symlink"
   clean(root);
 });
 
-test("mergeVibeConfig: missing file is created with agent_paths only", () => {
+test("mergeVibeConfig: missing file is created with agent_paths and the allowlist table", () => {
   const root = tmp();
   const sp = path.join(root, "nested", "dir", "config.toml");
   const r = gen.mergeVibeConfig(sp, root);
   eq(r.agentPaths.changed, true);
-  eq(r.allowlist.changed, false);
-  eq(fs.readFileSync(sp, "utf8"), `agent_paths = ["${root}/agents-vibe"]\n`);
+  eq(r.allowlist.changed, true);
+  eq(fs.readFileSync(sp, "utf8"),
+    `agent_paths = ["${root}/agents-vibe"]\n\n[tools.read_file]\nallowlist = ["${root}/skills/**"]\n`);
   eq(fs.existsSync(sp + ".bak"), false);
   clean(root);
 });
@@ -726,7 +727,8 @@ test("mergeVibeConfig: absent key + no tables appends at EOF; missing trailing n
   w(root, "config.toml", 'active_model = "x"');
   const r = gen.mergeVibeConfig(sp, root);
   eq(r.agentPaths.changed, true);
-  eq(fs.readFileSync(sp, "utf8"), `active_model = "x"\nagent_paths = ["${root}/agents-vibe"]\n`);
+  eq(fs.readFileSync(sp, "utf8"),
+    `active_model = "x"\nagent_paths = ["${root}/agents-vibe"]\n\n[tools.read_file]\nallowlist = ["${root}/skills/**"]\n`);
   clean(root);
 });
 
@@ -753,7 +755,7 @@ test("mergeVibeConfig: single-line array merged, idempotent, .bak written", () =
     w(root, "config.toml", before);
     const r1 = gen.mergeVibeConfig(sp, root);
     eq(r1.agentPaths.changed, true, line);
-    const after = `agent_paths = ["/other", "${root}/agents-vibe"]\n`;
+    const after = `agent_paths = ["/other", "${root}/agents-vibe"]\n\n[tools.read_file]\nallowlist = ["${root}/skills/**"]\n`;
     eq(fs.readFileSync(sp, "utf8"), after, line);
     eq(fs.readFileSync(sp + ".bak", "utf8"), before, line);
     const r2 = gen.mergeVibeConfig(sp, root);
@@ -769,7 +771,7 @@ test("mergeVibeConfig: agent_paths under a sub-table is invisible, never edited"
   const r = gen.mergeVibeConfig(sp, root);
   eq(r.agentPaths.changed, true);
   eq(fs.readFileSync(sp, "utf8"),
-    `agent_paths = ["${root}/agents-vibe"]\n[foo]\nagent_paths = ["/other"]\n`);
+    `agent_paths = ["${root}/agents-vibe"]\n[foo]\nagent_paths = ["/other"]\n\n[tools.read_file]\nallowlist = ["${root}/skills/**"]\n`);
   clean(root);
 });
 
@@ -780,14 +782,16 @@ test("mergeVibeConfig: multi-line array, inline comment, non-array value, duplic
     'agent_paths = "/other"\n',
     'agent_paths = ["/a"]\nagent_paths = ["/b"]\n',
   ];
-  for (const before of cases) {
+  for (const head of cases) {
     const root = tmp(); const sp = path.join(root, "config.toml");
+    // allowlist duty pre-satisfied so the fixture pins the agent_paths bail alone
+    const before = `${head}\n[tools.read_file]\nallowlist = ["${root}/skills/**"]\n`;
     w(root, "config.toml", before);
     const r = gen.mergeVibeConfig(sp, root);
-    eq(r.agentPaths.changed, false, before);
+    eq(r.agentPaths.changed, false, head);
     eq(fs.readFileSync(sp, "utf8"), before);
-    eq(fs.existsSync(sp + ".bak"), false, before);
-    eq(r.agentPaths.error.includes(`add "${root}/agents-vibe" to the agent_paths`), true, before);
+    eq(fs.existsSync(sp + ".bak"), false, head);
+    eq(r.agentPaths.error.includes(`add "${root}/agents-vibe" to the agent_paths`), true, head);
     clean(root);
   }
 });
@@ -809,7 +813,7 @@ test("mergeVibeConfig: CRLF file keeps CRLF on inserted lines", () => {
   const r = gen.mergeVibeConfig(sp, root);
   eq(r.agentPaths.changed, true);
   eq(fs.readFileSync(sp, "utf8"),
-    `agent_paths = ["${root}/agents-vibe"]\r\n[tools.bash]\r\nallowlist = []\r\n`);
+    `agent_paths = ["${root}/agents-vibe"]\r\n[tools.bash]\r\nallowlist = []\r\n\r\n[tools.read_file]\r\nallowlist = ["${root}/skills/**"]\r\n`);
   clean(root);
 });
 
@@ -823,6 +827,75 @@ test("mergeVibeConfig: .bak replaced atomically, not written through a symlink",
   eq(fs.readFileSync(path.join(root, "victim.txt"), "utf8"), "do not touch");
   eq(fs.lstatSync(sp + ".bak").isSymbolicLink(), false);
   eq(fs.readFileSync(sp + ".bak", "utf8"), 'active_model = "x"\n');
+  clean(root);
+});
+
+test("mergeVibeConfig: absent allowlist table appended at EOF", () => {
+  const root = tmp(); const sp = path.join(root, "config.toml");
+  w(root, "config.toml", 'agent_paths = ["/other"]\n[other]\nx = 1\n');
+  const r = gen.mergeVibeConfig(sp, root);
+  eq(r.allowlist.changed, true);
+  eq(r.agentPaths.changed, true);
+  eq(fs.readFileSync(sp, "utf8"),
+    `agent_paths = ["/other", "${root}/agents-vibe"]\n[other]\nx = 1\n\n[tools.read_file]\nallowlist = ["${root}/skills/**"]\n`);
+  clean(root);
+});
+
+test("mergeVibeConfig: single-line allowlist merged, idempotent, .bak written once", () => {
+  const root = tmp(); const sp = path.join(root, "config.toml");
+  const before = '[tools.read_file]\nallowlist = ["/safe/**"]\n';
+  w(root, "config.toml", before);
+  const r1 = gen.mergeVibeConfig(sp, root);
+  eq(r1.allowlist.changed, true);
+  eq(r1.agentPaths.changed, true);
+  const after = `agent_paths = ["${root}/agents-vibe"]\n[tools.read_file]\nallowlist = ["/safe/**", "${root}/skills/**"]\n`;
+  eq(fs.readFileSync(sp, "utf8"), after);
+  eq(fs.readFileSync(sp + ".bak", "utf8"), before);
+  const r2 = gen.mergeVibeConfig(sp, root);
+  eq(r2.allowlist.changed, false);
+  eq(r2.agentPaths.changed, false);
+  eq(fs.readFileSync(sp, "utf8"), after);
+  clean(root);
+});
+
+test("mergeVibeConfig: dotted variant table forces bail with remedy", () => {
+  const root = tmp(); const sp = path.join(root, "config.toml");
+  const before = `agent_paths = ["${root}/agents-vibe"]\n[tools.read_file.sub]\nx = 1\n`;
+  w(root, "config.toml", before);
+  const r = gen.mergeVibeConfig(sp, root);
+  eq(r.allowlist.changed, false);
+  eq(r.agentPaths.changed, false);
+  eq(r.allowlist.error.includes(`add "${root}/skills/**" to the allowlist`), true);
+  eq(fs.readFileSync(sp, "utf8"), before);
+  clean(root);
+});
+
+test("mergeVibeConfig: multi-line allowlist or inline comment bails with remedy", () => {
+  for (const tail of [
+    '[tools.read_file]\nallowlist = [\n  "/safe/**",\n]\n',
+    '[tools.read_file]\nallowlist = ["/safe/**"] # mine\n',
+  ]) {
+    const root = tmp(); const sp = path.join(root, "config.toml");
+    const before = `agent_paths = ["${root}/agents-vibe"]\n${tail}`;
+    w(root, "config.toml", before);
+    const r = gen.mergeVibeConfig(sp, root);
+    eq(r.allowlist.changed, false, tail);
+    eq(r.allowlist.error.includes(`add "${root}/skills/**" to the allowlist`), true, tail);
+    eq(fs.readFileSync(sp, "utf8"), before);
+    eq(fs.existsSync(sp + ".bak"), false, tail);
+    clean(root);
+  }
+});
+
+test("mergeVibeConfig: table present with no allowlist key inserts under header, other keys preserved", () => {
+  const root = tmp(); const sp = path.join(root, "config.toml");
+  const before = `agent_paths = ["${root}/agents-vibe"]\n[tools.read_file]\npermission = "ask"\n`;
+  w(root, "config.toml", before);
+  const r = gen.mergeVibeConfig(sp, root);
+  eq(r.allowlist.changed, true);
+  eq(r.agentPaths.changed, false);
+  eq(fs.readFileSync(sp, "utf8"),
+    `agent_paths = ["${root}/agents-vibe"]\n[tools.read_file]\nallowlist = ["${root}/skills/**"]\npermission = "ask"\n`);
   clean(root);
 });
 

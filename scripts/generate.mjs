@@ -420,8 +420,10 @@ function tomlBasicString(s) {
 
 export function mergeVibeConfig(configPath, repoRoot) {
   const result = { agentPaths: { changed: false }, allowlist: { changed: false } };
-  const entry = path.join(repoRoot, "agents-vibe");
-  const agentErr = `vibe config: agent_paths unmergeable; add "${entry}" to the agent_paths array in ${configPath} manually`;
+  const agentsEntry = path.join(repoRoot, "agents-vibe");
+  const allowEntry = path.join(repoRoot, "skills") + "/**";
+  const agentErr = `vibe config: agent_paths unmergeable; add "${agentsEntry}" to the agent_paths array in ${configPath} manually`;
+  const allowErr = `vibe config: [tools.read_file] allowlist unmergeable; add "${allowEntry}" to the allowlist array in ${configPath} manually`;
 
   let existed = false;
   let parsed = null;
@@ -429,81 +431,123 @@ export function mergeVibeConfig(configPath, repoRoot) {
     existed = fs.existsSync(configPath);
     if (existed) parsed = readToml(configPath);
   } catch (e) {
-    result.agentPaths = { changed: false, error: `vibe config: unreadable ${configPath}: ${e.message}` };
+    const err = `vibe config: unreadable ${configPath}: ${e.message}`;
+    result.agentPaths = { changed: false, error: err };
+    result.allowlist = { changed: false, error: err };
     return result;
   }
 
   if (!existed) {
     try {
       fs.mkdirSync(path.dirname(configPath), { recursive: true });
-      atomicWrite(configPath, `agent_paths = ["${entry}"]\n`);
+      atomicWrite(configPath,
+        `agent_paths = ["${agentsEntry}"]\n\n[tools.read_file]\nallowlist = ["${allowEntry}"]\n`);
       result.agentPaths = { changed: true };
+      result.allowlist = { changed: true };
     } catch (e) {
-      result.agentPaths = { changed: false, error: `vibe config: cannot create ${configPath}: ${e.message}` };
+      const err = `vibe config: cannot create ${configPath}: ${e.message}`;
+      result.agentPaths = { changed: false, error: err };
+      result.allowlist = { changed: false, error: err };
     }
     return result;
   }
 
   if (parsed.raw.includes('"""') || parsed.raw.includes("'''")) {
     result.agentPaths = { changed: false, error: agentErr };
-    result.allowlist = { changed: false, error: `vibe config: [tools.read_file] allowlist unmergeable (multi-line string in file); add it manually` };
+    result.allowlist = { changed: false, error: allowErr };
     return result;
   }
 
   const lines = [...parsed.lines];
+  let dirty = false;
+
   const headerIdx = lines.findIndex(l => /^\s*\[/.test(l));
   const regionEnd = headerIdx === -1 ? lines.length : headerIdx;
-  const keyRe = /^\s*agent_paths\s*=\s*(.*)$/;
   const hits = [];
   for (let i = 0; i < regionEnd; i++) {
-    const m = lines[i].match(keyRe);
+    const m = lines[i].match(/^\s*agent_paths\s*=\s*(.*)$/);
     if (m) hits.push({ idx: i, rest: m[1] });
   }
 
   if (hits.length > 1) {
     result.agentPaths = { changed: false, error: agentErr };
-    return result;
-  }
-
-  if (hits.length === 0) {
+  } else if (hits.length === 0) {
     let insertAt = regionEnd;
     if (headerIdx !== -1) {
       while (insertAt > 0 && /^\s*#/.test(lines[insertAt - 1])) insertAt--;
     } else if (lines.length > 0 && lines[lines.length - 1] === "") {
       insertAt = lines.length - 1;
     }
-    lines.splice(insertAt, 0, `agent_paths = ["${entry}"]`);
+    lines.splice(insertAt, 0, `agent_paths = ["${agentsEntry}"]`);
     if (headerIdx === -1 && lines[lines.length - 1] !== "") lines.push("");
-    try {
-      atomicWrite(configPath + ".bak", (parsed.hadBom ? "\uFEFF" : "") + parsed.raw);
-      writeTomlLines(configPath, parsed, lines);
+    dirty = true;
+    result.agentPaths = { changed: true };
+  } else {
+    const { idx, rest } = hits[0];
+    const arrMatch = rest.match(/^\s*\[(.*)\]\s*$/);
+    const els = arrMatch ? tomlArrayElements(arrMatch[1]) : null;
+    const contents = els ? els.map(tomlElementContent) : null;
+    if (contents === null) {
+      result.agentPaths = { changed: false, error: agentErr };
+    } else if (contents.some(c => realPath(expandTilde(c)) === realPath(agentsEntry))) {
+      result.agentPaths = { changed: false };
+    } else {
+      lines[idx] = `agent_paths = [${[...contents.map(tomlBasicString), tomlBasicString(agentsEntry)].join(", ")}]`;
+      dirty = true;
       result.agentPaths = { changed: true };
-    } catch (e) {
-      result.agentPaths = { changed: false, error: `vibe config: write failed: ${e.message}` };
     }
-    return result;
   }
 
-  const { idx, rest } = hits[0];
-  const arrMatch = rest.match(/^\s*\[(.*)\]\s*$/);
-  const els = arrMatch ? tomlArrayElements(arrMatch[1]) : null;
-  if (els === null) {
-    result.agentPaths = { changed: false, error: agentErr };
-    return result;
+  const exactHeader = lines.findIndex(l => /^\s*\[tools\.read_file\]\s*$/.test(l));
+  const dottedHeader = lines.findIndex(l => /^\s*\[tools\.read_file\./.test(l));
+  if (exactHeader === -1 && dottedHeader !== -1) {
+    result.allowlist = { changed: false, error: allowErr };
+  } else if (exactHeader === -1) {
+    if (lines[lines.length - 1] !== "") lines.push("");
+    lines.splice(lines.length - 1, 0, "", "[tools.read_file]", `allowlist = ["${allowEntry}"]`);
+    dirty = true;
+    result.allowlist = { changed: true };
+  } else {
+    let sectionEnd = lines.length;
+    for (let i = exactHeader + 1; i < lines.length; i++) {
+      if (/^\s*\[/.test(lines[i])) { sectionEnd = i; break; }
+    }
+    const aHits = [];
+    for (let i = exactHeader + 1; i < sectionEnd; i++) {
+      const m = lines[i].match(/^\s*allowlist\s*=\s*(.*)$/);
+      if (m) aHits.push({ idx: i, rest: m[1] });
+    }
+    if (aHits.length > 1) {
+      result.allowlist = { changed: false, error: allowErr };
+    } else if (aHits.length === 0) {
+      lines.splice(exactHeader + 1, 0, `allowlist = ["${allowEntry}"]`);
+      dirty = true;
+      result.allowlist = { changed: true };
+    } else {
+      const { idx, rest } = aHits[0];
+      const arrMatch = rest.match(/^\s*\[(.*)\]\s*$/);
+      const els = arrMatch ? tomlArrayElements(arrMatch[1]) : null;
+      const contents = els ? els.map(tomlElementContent) : null;
+      if (contents === null) {
+        result.allowlist = { changed: false, error: allowErr };
+      } else if (contents.includes(allowEntry)) {
+        result.allowlist = { changed: false };
+      } else {
+        lines[idx] = `allowlist = [${[...contents.map(tomlBasicString), tomlBasicString(allowEntry)].join(", ")}]`;
+        dirty = true;
+        result.allowlist = { changed: true };
+      }
+    }
   }
-  const contents = els.map(tomlElementContent);
-  const already = contents.some(c => realPath(expandTilde(c)) === realPath(entry));
-  if (already) {
-    result.agentPaths = { changed: false };
-    return result;
-  }
-  lines[idx] = `agent_paths = [${[...contents.map(tomlBasicString), tomlBasicString(entry)].join(", ")}]`;
+
+  if (!dirty) return result;
   try {
     atomicWrite(configPath + ".bak", (parsed.hadBom ? "\uFEFF" : "") + parsed.raw);
     writeTomlLines(configPath, parsed, lines);
-    result.agentPaths = { changed: true };
   } catch (e) {
-    result.agentPaths = { changed: false, error: `vibe config: write failed: ${e.message}` };
+    const err = `vibe config: write failed: ${e.message}`;
+    if (result.agentPaths.changed) result.agentPaths = { changed: false, error: err };
+    if (result.allowlist.changed) result.allowlist = { changed: false, error: err };
   }
   return result;
 }
