@@ -576,9 +576,12 @@ export function cloneState(cloneDir) {
   return st.stdout.trim() === "" ? "ok" : "dirty";
 }
 
-export function statusOf(root, manifest) {
+export function statusOf(root, manifest, opts = {}) {
   const rows = [];
   const dropped = [];
+  const warnings = [];
+  const userAgentsDir = opts.userAgentsDir
+    ?? path.join(process.env.VIBE_HOME || path.join(os.homedir(), ".vibe"), "agents");
   for (const entry of manifest.repos) {
     const cloneDir = path.join(root, "skills", entry.name);
     const clone = cloneState(cloneDir);
@@ -596,19 +599,40 @@ export function statusOf(root, manifest) {
       const expected = renderAgentFile(entry, found.skills.map(s => s.name));
       agent = onDisk === expected ? "in-sync" : "stale";
     }
-    rows.push({ name: entry.name, clone, skills: found.skills.length, agent });
+    const tomlFile = path.join(root, "agents-vibe", `${entry.name}.toml`);
+    let vibe;
+    if (found.skills.length === 0) {
+      vibe = fs.existsSync(tomlFile) ? "stale" : "—";
+    } else if (!fs.existsSync(tomlFile)) {
+      vibe = "missing";
+    } else {
+      const onDisk = fs.readFileSync(tomlFile, "utf8");
+      const expected = renderVibeAgentTOML(entry, found.skills);
+      vibe = onDisk === expected ? "in-sync" : "stale";
+    }
+    rows.push({ name: entry.name, clone, skills: found.skills.length, agent, vibe });
   }
-  const ok = rows.every(r => r.clone === "ok" && r.agent === "in-sync");
-  return { rows, dropped, exitCode: ok ? 0 : 1 };
+  if (fs.existsSync(userAgentsDir)) {
+    for (const r of rows) {
+      if (fs.existsSync(path.join(userAgentsDir, `${r.name}.toml`))) {
+        warnings.push(`${r.name}: name collision — also defined in ${userAgentsDir}`);
+      }
+    }
+  }
+  const ok = rows.every(r => r.clone === "ok" && r.agent === "in-sync"
+    && (r.vibe === "in-sync" || r.vibe === "—"));
+  return { rows, dropped, warnings, exitCode: ok ? 0 : 1 };
 }
 
 function printStatus(root, manifest) {
-  const { rows, dropped, exitCode } = statusOf(root, manifest);
-  console.log(["NAME", "CLONE", "SKILLS", "AGENT"].reduce((a, h, i) => a + h.padEnd([14, 10, 7, 10][i]), ""));
+  const { rows, dropped, warnings, exitCode } = statusOf(root, manifest);
+  console.log(["NAME", "CLONE", "SKILLS", "AGENT", "VIBE"].reduce((a, h, i) => a + h.padEnd([14, 10, 7, 10, 10][i]), ""));
   for (const r of rows) {
-    console.log(r.name.padEnd(14) + r.clone.padEnd(10) + String(r.skills).padEnd(7) + r.agent);
+    console.log(r.name.padEnd(14) + r.clone.padEnd(10) + String(r.skills).padEnd(7)
+      + r.agent.padEnd(10) + r.vibe);
   }
   for (const d of dropped) console.log(d);
+  for (const x of warnings) console.log(x);
   return exitCode;
 }
 

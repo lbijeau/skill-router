@@ -359,13 +359,71 @@ test("status: exit rules incl. expected absence for zero-skill entries", () => {
   skill(root, "skills/one/a");
   gitRepo(path.join(root, "skills/one"));
   w(root, "agents/one.md", gen.renderAgentFile(manifest.repos[0], ["a"]));
+  const found = gen.discoverSkills(path.join(root, "skills/one"), manifest.repos[0]);
+  w(root, "agents-vibe/one.toml", gen.renderVibeAgentTOML(manifest.repos[0], found.skills));
   gitRepo(path.join(root, "skills/zero"));           // clone ok, no skills
   const r = gen.statusOf(root, manifest);
   eq(r.rows.length, 2);
   eq(r.rows.find(x => x.name === "zero").agent, "in-sync");
   eq(r.rows.find(x => x.name === "one").agent, "in-sync");
+  eq(r.rows.find(x => x.name === "one").vibe, "in-sync");
+  eq(r.rows.find(x => x.name === "zero").vibe, "—");
   eq(r.exitCode, 0);
   clean(root);
+});
+
+test("status: zero-skill leftover TOML is stale and fails exit", () => {
+  const root = tmp();
+  const manifest = { repos: [
+    { name: "one", url: "https://github.com/x/y", description: "d", persona: "p" },
+    { name: "zero", url: "https://github.com/x/y", description: "d", persona: "p" },
+  ]};
+  w(root, "repos.json", JSON.stringify(manifest));
+  skill(root, "skills/one/a");
+  gitRepo(path.join(root, "skills/one"));
+  w(root, "agents/one.md", gen.renderAgentFile(manifest.repos[0], ["a"]));
+  const found = gen.discoverSkills(path.join(root, "skills/one"), manifest.repos[0]);
+  w(root, "agents-vibe/one.toml", gen.renderVibeAgentTOML(manifest.repos[0], found.skills));
+  gitRepo(path.join(root, "skills/zero"));
+  w(root, "agents-vibe/zero.toml", "leftover");
+  const r = gen.statusOf(root, manifest);
+  eq(r.rows.find(x => x.name === "zero").vibe, "stale");
+  eq(r.rows.find(x => x.name === "one").agent, "in-sync");
+  eq(r.exitCode, 1);
+  clean(root);
+});
+
+test("status: only-vibe-stale forces exit 1", () => {
+  const root = tmp();
+  const manifest = { repos: [
+    { name: "one", url: "https://github.com/x/y", description: "d", persona: "p" }]};
+  w(root, "repos.json", JSON.stringify(manifest));
+  skill(root, "skills/one/a");
+  gitRepo(path.join(root, "skills/one"));
+  w(root, "agents/one.md", gen.renderAgentFile(manifest.repos[0], ["a"]));
+  w(root, "agents-vibe/one.toml", "tampered");
+  const r = gen.statusOf(root, manifest);
+  eq(r.rows[0].agent, "in-sync");
+  eq(r.rows[0].vibe, "stale");
+  eq(r.exitCode, 1);
+  clean(root);
+});
+
+test("status: name collision with user agents dir is a warning, not an exit", () => {
+  const root = tmp(); const ua = tmp();
+  const manifest = { repos: [
+    { name: "one", url: "https://github.com/x/y", description: "d", persona: "p" }]};
+  w(root, "repos.json", JSON.stringify(manifest));
+  skill(root, "skills/one/a");
+  gitRepo(path.join(root, "skills/one"));
+  w(root, "agents/one.md", gen.renderAgentFile(manifest.repos[0], ["a"]));
+  const found = gen.discoverSkills(path.join(root, "skills/one"), manifest.repos[0]);
+  w(root, "agents-vibe/one.toml", gen.renderVibeAgentTOML(manifest.repos[0], found.skills));
+  w(ua, "one.toml", "user agent");
+  const r = gen.statusOf(root, manifest, { userAgentsDir: ua });
+  eq(r.warnings.some(x => /one.*collision/.test(x)), true);
+  eq(r.exitCode, 0);
+  clean(root); clean(ua);
 });
 
 test("status: stale, missing, dirty, not-a-repo, missing-clone all flagged", () => {
