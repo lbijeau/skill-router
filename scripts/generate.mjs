@@ -265,6 +265,25 @@ export function writeAgentFiles(root, manifest, skip = new Set()) {
   return { written, removed, warnings, dropped };
 }
 
+export function writeVibeAgentFiles(root, manifest, skip = new Set()) {
+  const agentsDir = path.join(root, "agents-vibe");
+  fs.mkdirSync(agentsDir, { recursive: true });
+  const written = [], removed = [];
+  for (const entry of manifest.repos) {
+    if (skip.has(entry.name)) continue;
+    const found = discoverSkills(path.join(root, "skills", entry.name), entry);
+    const file = path.join(agentsDir, `${entry.name}.toml`);
+    if (found.skills.length > 0) {
+      fs.writeFileSync(file, renderVibeAgentTOML(entry, found.skills));
+      written.push(entry.name);
+    } else if (fs.existsSync(file)) {
+      fs.rmSync(file);
+      removed.push(entry.name);
+    }
+  }
+  return { written, removed };
+}
+
 export function prune(root, manifest) {
   const agents = [], clones = [];
   const names = new Set(manifest.repos.map(e => e.name));

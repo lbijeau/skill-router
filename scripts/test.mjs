@@ -245,6 +245,36 @@ test("writeAgentFiles: writes, idempotent, removes zero-skill leftovers", () => 
   clean(root);
 });
 
+test("writeVibeAgentFiles: writes, idempotent, removes zero-skill leftovers", () => {
+  const root = tmp();
+  w(root, "repos.json", JSON.stringify({ repos: [
+    { name: "one", url: "https://github.com/x/y", description: "d", persona: "p" },
+    { name: "zero", url: "https://github.com/x/y", description: "d", persona: "p" },
+  ]}));
+  skill(root, "skills/one/a");
+  w(root, "agents-vibe/zero.toml", "stale");
+  const m = gen.loadManifest(root);
+  const r = gen.writeVibeAgentFiles(root, m);
+  eq(r.written.join(","), "one");
+  eq(r.removed.join(","), "zero");
+  const first = fs.readFileSync(path.join(root, "agents-vibe/one.toml"), "utf8");
+  gen.writeVibeAgentFiles(root, m);
+  eq(fs.readFileSync(path.join(root, "agents-vibe/one.toml"), "utf8"), first);
+  eq(fs.existsSync(path.join(root, "agents-vibe/zero.toml")), false);
+  clean(root);
+});
+
+test("writeVibeAgentFiles: failed entries are skipped, file untouched", () => {
+  const root = tmp();
+  w(root, "repos.json", JSON.stringify({ repos: [
+    { name: "bad", url: "https://github.com/x/y", description: "d", persona: "p" }]}));
+  w(root, "agents-vibe/bad.toml", "pre-existing");
+  const r = gen.writeVibeAgentFiles(root, gen.loadManifest(root), new Set(["bad"]));
+  eq(r.written.length, 0);
+  eq(fs.readFileSync(path.join(root, "agents-vibe/bad.toml"), "utf8"), "pre-existing");
+  clean(root);
+});
+
 test("prune: removes agents and clones not in the manifest", () => {
   const root = tmp();
   w(root, "repos.json", JSON.stringify({ repos: [
