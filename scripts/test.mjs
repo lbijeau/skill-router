@@ -1023,6 +1023,67 @@ test("mergeVibeConfig: table present with no allowlist key inserts under header,
   clean(root);
 });
 
+test("mergeVibeConfig: unrecognized [tools.read_file] forms never duplicate the table", () => {
+  for (const tail of [
+    "[tools.read_file] # my overrides\n",
+    "[[tools.read_file]]\n",
+    'tools.read_file.allowlist = ["/x/**"]\n',
+  ]) {
+    const root = tmp(); const sp = path.join(root, "config.toml");
+    const before = `agent_paths = ["${root}/agents-vibe"]\n${tail}`;
+    w(root, "config.toml", before);
+    const r = gen.mergeVibeConfig(sp, root);
+    eq(r.allowlist.changed, false, tail);
+    eq(r.allowlist.error.includes(`add "${root}/skills/**" to the allowlist`), true, tail);
+    eq(fs.readFileSync(sp, "utf8"), before);
+    eq(fs.existsSync(sp + ".bak"), false, tail);
+    clean(root);
+  }
+});
+
+test("mergeVibeConfig: unclosed array opener anywhere forces safe-bail", () => {
+  for (const withPaths of [true, false]) {
+    const root = tmp(); const sp = path.join(root, "config.toml");
+    const before = (withPaths ? `agent_paths = ["${root}/agents-vibe"]\n` : "")
+      + 'theme = [\n  ["dark"],\n]\n';
+    w(root, "config.toml", before);
+    const r = gen.mergeVibeConfig(sp, root);
+    eq(r.agentPaths.changed, false, String(withPaths));
+    eq(r.allowlist.changed, false, String(withPaths));
+    eq(fs.readFileSync(sp, "utf8"), before);
+    eq(fs.existsSync(sp + ".bak"), false, String(withPaths));
+    eq(r.agentPaths.error.includes(`add "${root}/agents-vibe" to the agent_paths`), true, String(withPaths));
+    eq(r.allowlist.error.includes(`add "${root}/skills/**" to the allowlist`), true, String(withPaths));
+    clean(root);
+  }
+});
+
+test("mergeVibeConfig: suspicious escape in an existing element bails; legit escapes merge", () => {
+  {
+    const root = tmp(); const sp = path.join(root, "config.toml");
+    const before = 'agent_paths = ["/a\\u0020b"]\n';
+    w(root, "config.toml", before);
+    const r = gen.mergeVibeConfig(sp, root);
+    eq(r.agentPaths.changed, false);
+    // the suspicious element is never edited or re-rendered; the independent
+    // allowlist duty still appends its table without touching that line
+    const out = fs.readFileSync(sp, "utf8");
+    eq(out.startsWith('agent_paths = ["/a\\u0020b"]\n\n[tools.read_file]\n'), true);
+    eq(out.includes(`allowlist = ["${root}/skills/**"]`), true);
+    eq(r.agentPaths.error.includes(`add "${root}/agents-vibe" to the agent_paths`), true);
+    clean(root);
+  }
+  {
+    const root = tmp(); const sp = path.join(root, "config.toml");
+    w(root, "config.toml", 'agent_paths = ["/a\\"b"]\n');
+    const r = gen.mergeVibeConfig(sp, root);
+    eq(r.agentPaths.changed, true);
+    eq(fs.readFileSync(sp, "utf8"),
+      `agent_paths = ["/a\\"b", "${root}/agents-vibe"]\n\n[tools.read_file]\nallowlist = ["${root}/skills/**"]\n`);
+    clean(root);
+  }
+});
+
 test("prune: only generated agent files are pruned, user files survive", () => {
   const root = tmp();
   w(root, "repos.json", JSON.stringify({ repos: [

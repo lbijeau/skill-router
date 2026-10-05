@@ -430,6 +430,15 @@ function tomlElementContent(el) {
   return c;
 }
 
+function tomlArrayContents(els) {
+  const out = [];
+  for (const el of els) {
+    if (el[0] === '"' && /\\[^"\\]/.test(el.slice(1, -1))) return null;
+    out.push(tomlElementContent(el));
+  }
+  return out;
+}
+
 function tomlBasicString(s) {
   return '"' + s.replace(/\\/g, "\\\\").replace(/"/g, '\\"') + '"';
 }
@@ -474,6 +483,12 @@ export function mergeVibeConfig(configPath, repoRoot) {
     return result;
   }
 
+  if (parsed.lines.some(l => /=\s*\[\s*$/.test(l))) {
+    result.agentPaths = { changed: false, error: agentErr };
+    result.allowlist = { changed: false, error: allowErr };
+    return result;
+  }
+
   const lines = [...parsed.lines];
   let dirty = false;
 
@@ -502,7 +517,7 @@ export function mergeVibeConfig(configPath, repoRoot) {
     const { idx, rest } = hits[0];
     const arrMatch = rest.match(/^\s*\[(.*)\]\s*$/);
     const els = arrMatch ? tomlArrayElements(arrMatch[1]) : null;
-    const contents = els ? els.map(tomlElementContent) : null;
+    const contents = els ? tomlArrayContents(els) : null;
     if (contents === null) {
       result.agentPaths = { changed: false, error: agentErr };
     } else if (contents.some(c => realPath(expandTilde(c)) === realPath(agentsEntry))) {
@@ -515,8 +530,9 @@ export function mergeVibeConfig(configPath, repoRoot) {
   }
 
   const exactHeader = lines.findIndex(l => /^\s*\[tools\.read_file\]\s*$/.test(l));
-  const dottedHeader = lines.findIndex(l => /^\s*\[tools\.read_file\./.test(l));
-  if (exactHeader === -1 && dottedHeader !== -1) {
+  const looseReadFile = lines.some(l =>
+    /^\s*(?:\[\[?tools\.read_file|tools\.read_file)/.test(l));
+  if (exactHeader === -1 && looseReadFile) {
     result.allowlist = { changed: false, error: allowErr };
   } else if (exactHeader === -1) {
     if (lines[lines.length - 1] !== "") lines.push("");
@@ -543,7 +559,7 @@ export function mergeVibeConfig(configPath, repoRoot) {
       const { idx, rest } = aHits[0];
       const arrMatch = rest.match(/^\s*\[(.*)\]\s*$/);
       const els = arrMatch ? tomlArrayElements(arrMatch[1]) : null;
-      const contents = els ? els.map(tomlElementContent) : null;
+      const contents = els ? tomlArrayContents(els) : null;
       if (contents === null) {
         result.allowlist = { changed: false, error: allowErr };
       } else if (contents.includes(allowEntry)) {
