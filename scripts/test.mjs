@@ -124,6 +124,49 @@ test("discovery: CRLF frontmatter name has no stray \\r", () => {
   clean(root);
 });
 
+test("parseSkillFrontmatter: single-line, quoted, folded, literal, missing", () => {
+  const f = (desc) => gen.parseSkillFrontmatter(`---\nname: a\n${desc}\n---\n`);
+  eq(f("description: plain text").description, "plain text");
+  eq(f('description: "quoted text"').description, "quoted text");
+  eq(f("description: >\n  folded one\n  folded two").description, "folded one folded two");
+  eq(f("description: |-\n  lit one\n  lit two").description, "lit one lit two");
+  eq(f("description:").description, null);
+  eq(f("description: >\n  win").name, "a");   // closed detection still works
+  eq(gen.parseSkillFrontmatter("---\nname: a\n").closed, false);
+});
+
+test("parseSkillFrontmatter: folded block containing a name: line keeps name resolution", () => {
+  const r = gen.parseSkillFrontmatter(
+    "---\ndescription: >\n  name: not-a-name\n  more text\nname: real\n---\n");
+  eq(r.name, "real");
+  eq(r.description, "name: not-a-name more text");
+});
+
+test("parseSkillFrontmatter: truncation at 240 (sentence, word, hard branches)", () => {
+  const long = "word ".repeat(80).trim();                       // 399 chars, no punctuation
+  const sent = "First sentence. " + long;                       // sentence boundary < 240
+  const f = (d) => gen.parseSkillFrontmatter(`---\nname: a\n${d}\n---\n`);
+  eq(f("description: " + sent).description, "First sentence.");
+  // last space with index < 240 is at 239; the space itself is dropped
+  eq(f("description: " + long).description, long.slice(0, 239) + "…");
+  const noSpace = "x".repeat(300);
+  const h = f("description: " + noSpace).description;
+  eq(h.length, 241); eq(h.startsWith("x".repeat(240)), true); eq(h.endsWith("…"), true);
+});
+
+test("parseSkillFrontmatter: CRLF description carries no \\r", () => {
+  const r = gen.parseSkillFrontmatter("---\r\nname: a\r\ndescription: d\r\n---\r\n");
+  eq(r.description, "d");
+});
+
+test("discovery: refs carry normalized description", () => {
+  const root = tmp();
+  skill(root, "skills/one");                                   // fixture writes "description: test skill"
+  const r = gen.discoverSkills(root, E());
+  eq(r.skills[0].description, "test skill");
+  clean(root);
+});
+
 test("discovery: first sorted path wins collisions, loser reported", () => {
   const root = tmp();
   skill(root, "aaa/dup", "dup");
