@@ -70,6 +70,10 @@ Edit `repos.json` and rerun `./install.sh update`:
 
 ## Safety
 
+- Secret hygiene: `hooks/pre-commit` runs `gitleaks protect --staged` on
+  every commit and fails closed (no gitleaks → no commit). One-time setup
+  after cloning: `brew install gitleaks && git config core.hooksPath hooks`.
+  GitHub push protection is the remote-side backstop.
 - `~/.pi/agent/settings.json` is backed up to `settings.json.bak` before
   any write; an unparseable settings file is never touched.
 - Skill discovery is read-only: clones are only mutated by `git clone` /
