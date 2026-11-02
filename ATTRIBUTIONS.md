@@ -21,6 +21,9 @@ generated personas, check out the upstream repos directly:
 | `graphify` | [Graphify-Labs/graphify](https://github.com/Graphify-Labs/graphify) | Apache-2.0 (also offers MIT) |
 | `addyosmani` | [addyosmani/agent-skills](https://github.com/addyosmani/agent-skills) | MIT |
 | `impeccable` | [pbakaus/impeccable](https://github.com/pbakaus/impeccable) | Apache-2.0 |
+| `anatomy` | [wheresryan22/anatomy](https://github.com/wheresryan22/anatomy) | MIT |
+| `taste-skill` | [Leonxlnx/taste-skill](https://github.com/Leonxlnx/taste-skill) | MIT |
+| `hallmark` | [Nutlope/hallmark](https://github.com/Nutlope/hallmark) | MIT |
 
 Licenses were verified against the `LICENSE` files present in each clone
 (2026-10-04). Re-verify with `./install.sh update` if you add or swap
