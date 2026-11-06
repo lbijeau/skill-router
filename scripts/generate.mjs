@@ -772,13 +772,19 @@ export function statusOf(root, manifest, opts = {}) {
       }
     }
   }
+  // Mirror runFlow's `failed` semantics: clones that are missing or not
+  // repos render as (clone unavailable) in an install-written catalog, so the
+  // expected catalog here must skip them too or a correct-but-partially-
+  // failed install would read as stale forever.
+  const catalogSkip = new Set(rows.filter(r => r.clone === "missing" || r.clone === "not-a-repo")
+    .map(r => r.name));
   const catalogFile = path.join(root, "catalog", "skill-catalog.md");
   let catalog;
   if (!fs.existsSync(catalogFile)) {
     catalog = "missing";
   } else {
     const onDisk = fs.readFileSync(catalogFile, "utf8");
-    catalog = onDisk === renderSkillCatalog(root, manifest) ? "in-sync" : "stale";
+    catalog = onDisk === renderSkillCatalog(root, manifest, { skip: catalogSkip }) ? "in-sync" : "stale";
   }
   const routerFile = path.join(root, "agents", `${ROUTER_AGENT_NAME}.md`);
   let router;
@@ -794,20 +800,21 @@ export function statusOf(root, manifest, opts = {}) {
   return { rows, dropped, warnings, catalog, router, exitCode: ok ? 0 : 1 };
 }
 
-function printStatus(root, manifest) {
+export function printStatus(root, manifest) {
   const { rows, dropped, warnings, catalog, router, exitCode } = statusOf(root, manifest);
-  console.log(["NAME", "CLONE", "SKILLS", "AGENT", "VIBE"].reduce((a, h, i) => a + h.padEnd([14, 10, 7, 10, 10][i]), "") + "CATALOG    ROUTER");
-  console.log(catalog.padEnd(10) + router);
+  const lines = [
+    ["NAME", "CLONE", "SKILLS", "AGENT", "VIBE"].reduce((a, h, i) => a + h.padEnd([14, 10, 7, 10, 10][i]), "") + "CATALOG    ROUTER",
+    " ".repeat(51) + catalog.padEnd(10) + router,
+  ];
   for (const r of rows) {
-    console.log(r.name.padEnd(14) + r.clone.padEnd(10) + String(r.skills).padEnd(7)
+    lines.push(r.name.padEnd(14) + r.clone.padEnd(10) + String(r.skills).padEnd(7)
       + r.agent.padEnd(10) + r.vibe);
   }
-  for (const d of dropped) console.log(d);
-  for (const x of warnings) console.log(x);
-  return exitCode;
+  lines.push(...dropped, ...warnings);
+  return { output: lines.join("\n") + "\n", exitCode };
 }
 
-function runFlow(root, settingsPath, vibeConfigPath, mode) {
+function runFlow(root, settingsPath, vibeConfigPath, mode, skillsHome) {
   const manifest = loadManifest(root);
   const report = [];
   let anyFailed = false;
@@ -882,7 +889,7 @@ function runFlow(root, settingsPath, vibeConfigPath, mode) {
   report.push(`catalog: ${catalogResult.skillCount} skills written to catalog/skill-catalog.md`);
   writeRouterAgent(root);
   report.push(`router agent: ${ROUTER_AGENT_NAME} written to agents/${ROUTER_AGENT_NAME}.md`);
-  const synced = syncGlobalSkills(root);
+  const synced = syncGlobalSkills(root, skillsHome);
   for (const f of synced.written) {
     report.push(`global skill: ${path.basename(path.dirname(f))} synced to ${tildePath(f)}`);
   }
@@ -940,18 +947,20 @@ function runFlow(root, settingsPath, vibeConfigPath, mode) {
 
 const DEFAULT_SETTINGS = () => path.join(os.homedir(), ".pi/agent/settings.json");
 const DEFAULT_VIBE_CONFIG = () => path.join(process.env.VIBE_HOME || path.join(os.homedir(), ".vibe"), "config.toml");
-export function runInstall(root, settingsPath, vibeConfigPath) {
-  return runFlow(root, settingsPath ?? DEFAULT_SETTINGS(), vibeConfigPath ?? DEFAULT_VIBE_CONFIG(), "install");
+export function runInstall(root, settingsPath, vibeConfigPath, skillsHome) {
+  return runFlow(root, settingsPath ?? DEFAULT_SETTINGS(), vibeConfigPath ?? DEFAULT_VIBE_CONFIG(), "install", skillsHome);
 }
-export function runUpdate(root, settingsPath, vibeConfigPath) {
-  return runFlow(root, settingsPath ?? DEFAULT_SETTINGS(), vibeConfigPath ?? DEFAULT_VIBE_CONFIG(), "update");
+export function runUpdate(root, settingsPath, vibeConfigPath, skillsHome) {
+  return runFlow(root, settingsPath ?? DEFAULT_SETTINGS(), vibeConfigPath ?? DEFAULT_VIBE_CONFIG(), "update", skillsHome);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
   const cmd = process.argv[2];
   try {
     if (cmd === "status") {
-      process.exit(printStatus(REPO_ROOT, loadManifest(REPO_ROOT)));
+      const st = printStatus(REPO_ROOT, loadManifest(REPO_ROOT));
+      console.log(st.output.trimEnd());
+      process.exit(st.exitCode);
     }
     if (cmd === "install" || cmd === "update") {
       const r = cmd === "install"
