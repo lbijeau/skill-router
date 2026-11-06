@@ -768,7 +768,7 @@ export function statusOf(root, manifest, opts = {}) {
 }
 
 function printStatus(root, manifest) {
-  const { rows, dropped, warnings, catalog, exitCode } = statusOf(root, manifest);
+  const { rows, dropped, warnings, catalog, router, exitCode } = statusOf(root, manifest);
   console.log(["NAME", "CLONE", "SKILLS", "AGENT", "VIBE"].reduce((a, h, i) => a + h.padEnd([14, 10, 7, 10, 10][i]), "") + "CATALOG    ROUTER");
   console.log(catalog.padEnd(10) + router);
   for (const r of rows) {
