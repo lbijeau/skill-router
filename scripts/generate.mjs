@@ -299,6 +299,38 @@ export function writeVibeAgentFiles(root, manifest, skip = new Set()) {
   return { written, removed };
 }
 
+export const ROUTER_AGENT_NAME = "skill-router";
+
+export function renderRouterAgent({ root = REPO_ROOT, home } = {}) {
+  const catalogPath = tildePath(path.join(root, "catalog", "skill-catalog.md"), home);
+  return [
+    "---",
+    `name: ${ROUTER_AGENT_NAME}`,
+    'description: "Routes a described situation to the best skill across all pinned repos; returns skill, path, and digest"',
+    "inheritSkills: false",
+    "---",
+    "You are the skill router over every repo pinned in this repo's manifest.",
+    `First, read the catalog at ${catalogPath}. It lists every skill in every pinned repo, with a one-line description and the path to its SKILL.md.`,
+    "",
+    "Match the caller's situation to the catalog. When two skills are close, open both SKILL.md files and say which one fits and why the other does not.",
+    "",
+    "Open the winning SKILL.md and return: the skill name, its path, why it fits, and a short digest of the real file. Never answer from the catalog description alone.",
+    "",
+    "Recommend and stop. Do not execute the skill, edit files, or start the work.",
+    "",
+    "If nothing fits, say so plainly; do not force a nearest match.",
+    "",
+  ].join("\n");
+}
+
+export function writeRouterAgent(root) {
+  const agentsDir = path.join(root, "agents");
+  fs.mkdirSync(agentsDir, { recursive: true });
+  const file = path.join(agentsDir, `${ROUTER_AGENT_NAME}.md`);
+  fs.writeFileSync(file, renderRouterAgent({ root }));
+  return { file, written: true };
+}
+
 // The catalog is the router subagent's source of truth: every skill in every
 // clone, one row each, ~-anchored so the committed file is machine-independent.
 export function renderSkillCatalog(root, manifest, { home } = {}) {
@@ -721,15 +753,24 @@ export function statusOf(root, manifest, opts = {}) {
     const onDisk = fs.readFileSync(catalogFile, "utf8");
     catalog = onDisk === renderSkillCatalog(root, manifest) ? "in-sync" : "stale";
   }
+  const routerFile = path.join(root, "agents", `${ROUTER_AGENT_NAME}.md`);
+  let router;
+  if (!fs.existsSync(routerFile)) {
+    router = "missing";
+  } else {
+    const onDisk = fs.readFileSync(routerFile, "utf8");
+    router = onDisk === renderRouterAgent({ root }) ? "in-sync" : "stale";
+  }
   const ok = rows.every(r => r.clone === "ok" && r.agent === "in-sync"
-    && (r.vibe === "in-sync" || r.vibe === "—")) && catalog === "in-sync";
-  return { rows, dropped, warnings, catalog, exitCode: ok ? 0 : 1 };
+    && (r.vibe === "in-sync" || r.vibe === "—")) && catalog === "in-sync"
+    && router === "in-sync";
+  return { rows, dropped, warnings, catalog, router, exitCode: ok ? 0 : 1 };
 }
 
 function printStatus(root, manifest) {
   const { rows, dropped, warnings, catalog, exitCode } = statusOf(root, manifest);
-  console.log(["NAME", "CLONE", "SKILLS", "AGENT", "VIBE"].reduce((a, h, i) => a + h.padEnd([14, 10, 7, 10, 10][i]), "") + "CATALOG");
-  console.log(catalog);
+  console.log(["NAME", "CLONE", "SKILLS", "AGENT", "VIBE"].reduce((a, h, i) => a + h.padEnd([14, 10, 7, 10, 10][i]), "") + "CATALOG    ROUTER");
+  console.log(catalog.padEnd(10) + router);
   for (const r of rows) {
     console.log(r.name.padEnd(14) + r.clone.padEnd(10) + String(r.skills).padEnd(7)
       + r.agent.padEnd(10) + r.vibe);
@@ -812,6 +853,8 @@ function runFlow(root, settingsPath, vibeConfigPath, mode) {
   }
   const catalogResult = writeSkillCatalog(root, manifest);
   report.push(`catalog: ${catalogResult.skillCount} skills written to catalog/skill-catalog.md`);
+  writeRouterAgent(root);
+  report.push(`router agent: ${ROUTER_AGENT_NAME} written to agents/${ROUTER_AGENT_NAME}.md`);
   const piWritten = new Set(genResult.written);
   const vibeWritten = new Set(vibeResult.written);
   for (const { entry, state } of states) {

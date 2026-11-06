@@ -387,8 +387,10 @@ test("status: exit rules incl. expected absence for zero-skill entries", () => {
   w(root, "agents-vibe/one.toml", gen.renderVibeAgentTOML(manifest.repos[0], found.skills));
   gitRepo(path.join(root, "skills/zero"));           // clone ok, no skills
   gen.writeSkillCatalog(root, manifest);
+  gen.writeRouterAgent(root);
   const r = gen.statusOf(root, manifest);
   eq(r.catalog, "in-sync");
+  eq(r.router, "in-sync");
   eq(r.rows.length, 2);
   eq(r.rows.find(x => x.name === "zero").agent, "in-sync");
   eq(r.rows.find(x => x.name === "one").agent, "in-sync");
@@ -448,6 +450,7 @@ test("status: name collision with user agents dir is a warning, not an exit", ()
   w(root, "agents-vibe/one.toml", gen.renderVibeAgentTOML(manifest.repos[0], found.skills));
   w(ua, "one.toml", "user agent");
   gen.writeSkillCatalog(root, manifest);
+  gen.writeRouterAgent(root);
   const r = gen.statusOf(root, manifest, { userAgentsDir: ua });
   eq(r.warnings.some(x => /one.*collision/.test(x)), true);
   eq(r.exitCode, 0);
@@ -1179,6 +1182,50 @@ test("prune: generated vibe TOMLs removed by marker, user files survive", () => 
   eq(r.vibeAgents.join(","), "orphan");
   eq(fs.existsSync(path.join(root, "agents-vibe/orphan.toml")), false);
   eq(fs.existsSync(path.join(root, "agents-vibe/myown.toml")), true);
+  clean(root);
+});
+
+test("renderRouterAgent: frontmatter shape and persona body", () => {
+  const home = "/fake/home";
+  const out = gen.renderRouterAgent({ root: "/fake/home/sr", home });
+  eq(out.startsWith("---\nname: skill-router\n"), true);
+  eq(/^description: "/.test(out.split("\n")[2]), true);
+  eq(out.includes("inheritSkills: false"), true);
+  eq(/^skills:/m.test(out), false);
+  eq(/^skillPath:/m.test(out), false);
+  eq(out.includes("/fake/home"), false);   // no home path leaks into the file
+  eq(out.includes("~/sr/catalog/skill-catalog.md"), true);
+  eq(out.includes("Recommend and stop"), true);
+  eq(out.includes("digest"), true);
+});
+
+test("renderRouterAgent: real home gets ~-anchored catalog path", () => {
+  const out = gen.renderRouterAgent();
+  eq(out.includes("~/repositories/skill-router/catalog/skill-catalog.md"), true);
+});
+
+test("writeRouterAgent: writes, idempotent", () => {
+  const root = tmp();
+  const r = gen.writeRouterAgent(root);
+  eq(r.written, true);
+  const file = path.join(root, "agents", "skill-router.md");
+  eq(fs.existsSync(file), true);
+  const first = fs.readFileSync(file, "utf8");
+  eq(gen.writeRouterAgent(root).written, true);
+  eq(fs.readFileSync(file, "utf8"), first);
+  clean(root);
+});
+
+test("prune: never removes the skill-router agent", () => {
+  const root = tmp();
+  w(root, "repos.json", JSON.stringify({ repos: [
+    { name: "one", url: "https://github.com/x/y", description: "d", persona: "p" }]}));
+  fs.mkdirSync(path.join(root, "agents"), { recursive: true });
+  fs.writeFileSync(path.join(root, "agents", "skill-router.md"), gen.renderRouterAgent());
+  w(root, "agents/gone.md", "---\nname: gone\nskillPath: ../skills/gone\n---\np\n");
+  const r = gen.prune(root, gen.loadManifest(root));
+  eq(r.agents.join(","), "gone");
+  eq(fs.existsSync(path.join(root, "agents", "skill-router.md")), true);
   clean(root);
 });
 
