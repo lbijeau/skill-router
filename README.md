@@ -65,6 +65,22 @@ Then:
 - Removing or renaming a manifest entry prunes its agent file and clone on
   the next run.
 
+## route-skill
+
+`route-skill` is a global pi skill (synced to `~/.pi/agent/skills/route-skill/`)
+that routes a described situation to the best skill across **every** repo
+pinned in `repos.json`. It spawns the `skill-router` subagent, which reads the
+generated `catalog/skill-catalog.md` (one row per skill, rebuilt on every
+`install`/`update`), opens the winning `SKILL.md`, and returns the skill name,
+its path, why it fits, and a short digest. The catalog's bulk never enters the
+calling session's context; only the recommendation comes back. The caller then
+reads the recommended SKILL.md in-session and follows it.
+
+The catalog and the `skill-router` agent are derived artifacts, regenerated on
+every run — `./install.sh status` reports both (`CATALOG` and `ROUTER`
+columns). The global skill is boilerplate and is overwritten on update; put
+standing behavior in your own `AGENTS.md` or say it in the invocation.
+
 ## Tuning
 
 Edit `repos.json` and rerun `./install.sh update`:

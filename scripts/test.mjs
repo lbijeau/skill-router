@@ -1185,6 +1185,22 @@ test("prune: generated vibe TOMLs removed by marker, user files survive", () => 
   clean(root);
 });
 
+test("syncGlobalSkills: copies byte-identical, idempotent, skips non-skills", () => {
+  const root = tmp(); const skillsHome = tmp();
+  w(root, "global-skills/route-skill/SKILL.md", "---\nname: route-skill\ndescription: d\n---\nbody\n");
+  w(root, "global-skills/stray/readme.txt", "not a skill");
+  const r1 = gen.syncGlobalSkills(root, skillsHome);
+  eq(r1.written.length, 1);
+  eq(r1.skipped, 1);
+  const dest = path.join(skillsHome, "route-skill", "SKILL.md");
+  eq(fs.existsSync(dest), true);
+  eq(fs.readFileSync(dest, "utf8"), fs.readFileSync(path.join(root, "global-skills/route-skill/SKILL.md"), "utf8"));
+  const r2 = gen.syncGlobalSkills(root, skillsHome);
+  eq(r2.written.length, 1);
+  eq(fs.readFileSync(dest, "utf8"), fs.readFileSync(path.join(root, "global-skills/route-skill/SKILL.md"), "utf8"));
+  clean(root); clean(skillsHome);
+});
+
 test("renderRouterAgent: frontmatter shape and persona body", () => {
   const home = "/fake/home";
   const out = gen.renderRouterAgent({ root: "/fake/home/sr", home });

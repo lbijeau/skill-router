@@ -301,6 +301,27 @@ export function writeVibeAgentFiles(root, manifest, skip = new Set()) {
 
 export const ROUTER_AGENT_NAME = "skill-router";
 
+// Global skills live committed under global-skills/<name>/SKILL.md and are
+// synced (overwritten) into the pi skills home on every install/update: they
+// are generated-style boilerplate, and user edits do not survive updates.
+export function syncGlobalSkills(root, skillsHome) {
+  const home = skillsHome ?? path.join(os.homedir(), ".pi/agent/skills");
+  const srcDir = path.join(root, "global-skills");
+  const written = [];
+  let skipped = 0;
+  if (!fs.existsSync(srcDir)) return { written, skipped };
+  for (const d of fs.readdirSync(srcDir, { withFileTypes: true })) {
+    if (!d.isDirectory()) { skipped++; continue; }
+    const src = path.join(srcDir, d.name, "SKILL.md");
+    if (!fs.existsSync(src)) { skipped++; continue; }
+    const dest = path.join(home, d.name, "SKILL.md");
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.writeFileSync(dest, fs.readFileSync(src));
+    written.push(dest);
+  }
+  return { written, skipped };
+}
+
 export function renderRouterAgent({ root = REPO_ROOT, home } = {}) {
   const catalogPath = tildePath(path.join(root, "catalog", "skill-catalog.md"), home);
   return [
@@ -855,6 +876,10 @@ function runFlow(root, settingsPath, vibeConfigPath, mode) {
   report.push(`catalog: ${catalogResult.skillCount} skills written to catalog/skill-catalog.md`);
   writeRouterAgent(root);
   report.push(`router agent: ${ROUTER_AGENT_NAME} written to agents/${ROUTER_AGENT_NAME}.md`);
+  const synced = syncGlobalSkills(root);
+  for (const f of synced.written) {
+    report.push(`global skill: ${path.basename(path.dirname(f))} synced to ${tildePath(f)}`);
+  }
   const piWritten = new Set(genResult.written);
   const vibeWritten = new Set(vibeResult.written);
   for (const { entry, state } of states) {
