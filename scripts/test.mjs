@@ -414,6 +414,7 @@ test("status: zero-skill leftover TOML is stale and fails exit", () => {
   w(root, "agents-vibe/one.toml", gen.renderVibeAgentTOML(manifest.repos[0], found.skills));
   gitRepo(path.join(root, "skills/zero"));
   gen.writeSkillCatalog(root, manifest);
+  gen.writeRouterAgent(root);
   w(root, "agents-vibe/zero.toml", "leftover");
   const r = gen.statusOf(root, manifest);
   eq(r.rows.find(x => x.name === "zero").vibe, "stale");
@@ -431,6 +432,8 @@ test("status: only-vibe-stale forces exit 1", () => {
   gitRepo(path.join(root, "skills/one"));
   w(root, "agents/one.md", gen.renderAgentFile(manifest.repos[0], ["a"]));
   w(root, "agents-vibe/one.toml", "tampered");
+  gen.writeSkillCatalog(root, manifest);
+  gen.writeRouterAgent(root);
   const r = gen.statusOf(root, manifest);
   eq(r.rows[0].agent, "in-sync");
   eq(r.rows[0].vibe, "stale");
@@ -474,6 +477,8 @@ test("status: stale, missing, dirty, not-a-repo, missing-clone all flagged", () 
   gitRepo(path.join(root, "skills/dirty"));
   w(root, "skills/dirty/untracked.txt", "x");
   w(root, "skills/fake/junk.txt", "x");           // dir, no .git
+  gen.writeSkillCatalog(root, manifest);
+  gen.writeRouterAgent(root);
   const r = gen.statusOf(root, manifest);
   const by = n => r.rows.find(x => x.name === n);
   eq(by("stale").agent, "stale"); eq(by("stale").clone, "ok");
@@ -1298,6 +1303,48 @@ test("renderSkillCatalog: duplicate names across repos stay distinguishable", ()
   eq(out.includes("## two"), true);
   eq(out.includes("- shared: test skill — ~/sr/skills/two/shared/SKILL.md"), true);
   clean(home);
+});
+
+test("writeSkillCatalog: failed clones render (clone unavailable) and don't count", () => {
+  const root = tmp();
+  w(root, "repos.json", JSON.stringify({ repos: [
+    { name: "one", url: "https://github.com/x/y", description: "d", persona: "p" },
+    { name: "bad", url: "https://github.com/x/y", description: "d", persona: "p" },
+  ]}));
+  skill(root, "skills/one/a");
+  skill(root, "skills/bad/b");
+  const m = gen.loadManifest(root);
+  const r = gen.writeSkillCatalog(root, m, new Set(["bad"]));
+  eq(r.skillCount, 1);
+  const out = fs.readFileSync(path.join(root, "catalog", "skill-catalog.md"), "utf8");
+  eq(out.includes("## bad"), true);
+  eq(out.includes("(clone unavailable)"), true);
+  eq(out.includes("- b:"), false);
+  clean(root);
+});
+
+test("status: tampered catalog or router is stale and fails exit", () => {
+  const root = tmp();
+  const manifest = { repos: [
+    { name: "one", url: "https://github.com/x/y", description: "d", persona: "p" }]};
+  w(root, "repos.json", JSON.stringify(manifest));
+  skill(root, "skills/one/a");
+  gitRepo(path.join(root, "skills/one"));
+  w(root, "agents/one.md", gen.renderAgentFile(manifest.repos[0], ["a"]));
+  const found = gen.discoverSkills(path.join(root, "skills/one"), manifest.repos[0]);
+  w(root, "agents-vibe/one.toml", gen.renderVibeAgentTOML(manifest.repos[0], found.skills));
+  gen.writeSkillCatalog(root, manifest);
+  gen.writeRouterAgent(root);
+  w(root, "catalog/skill-catalog.md", "tampered");
+  let r = gen.statusOf(root, manifest);
+  eq(r.catalog, "stale");
+  eq(r.exitCode, 1);
+  gen.writeSkillCatalog(root, manifest);
+  w(root, "agents/skill-router.md", "tampered");
+  r = gen.statusOf(root, manifest);
+  eq(r.router, "stale");
+  eq(r.exitCode, 1);
+  clean(root);
 });
 
 test("writeSkillCatalog: writes file, counts skills, idempotent", () => {

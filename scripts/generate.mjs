@@ -354,8 +354,9 @@ export function writeRouterAgent(root) {
 
 // The catalog is the router subagent's source of truth: every skill in every
 // clone, one row each, ~-anchored so the committed file is machine-independent.
-export function renderSkillCatalog(root, manifest, { home } = {}) {
+export function renderSkillCatalog(root, manifest, { home, skip } = {}) {
   const homeDir = home ?? os.homedir();
+  const skipSet = skip ?? new Set();
   const parts = [
     "# Skill catalog",
     "",
@@ -364,6 +365,10 @@ export function renderSkillCatalog(root, manifest, { home } = {}) {
   ];
   for (const entry of manifest.repos) {
     parts.push(`## ${entry.name}`, "");
+    if (skipSet.has(entry.name)) {
+      parts.push("(clone unavailable)", "");
+      continue;
+    }
     const found = discoverSkills(path.join(root, "skills", entry.name), entry);
     if (found.skills.length === 0) {
       parts.push("(no skills yet)", "");
@@ -381,10 +386,11 @@ export function renderSkillCatalog(root, manifest, { home } = {}) {
   return parts.join("\n");
 }
 
-export function writeSkillCatalog(root, manifest) {
-  const content = renderSkillCatalog(root, manifest);
+export function writeSkillCatalog(root, manifest, skip = new Set()) {
+  const content = renderSkillCatalog(root, manifest, { skip });
   let skillCount = 0;
   for (const entry of manifest.repos) {
+    if (skip.has(entry.name)) continue;
     skillCount += discoverSkills(path.join(root, "skills", entry.name), entry).skills.length;
   }
   const dir = path.join(root, "catalog");
@@ -872,7 +878,7 @@ function runFlow(root, settingsPath, vibeConfigPath, mode) {
   for (const name of vibeResult.removed) {
     report.push(`${name}: 0 skills, removed stale vibe agent`);
   }
-  const catalogResult = writeSkillCatalog(root, manifest);
+  const catalogResult = writeSkillCatalog(root, manifest, failed);
   report.push(`catalog: ${catalogResult.skillCount} skills written to catalog/skill-catalog.md`);
   writeRouterAgent(root);
   report.push(`router agent: ${ROUTER_AGENT_NAME} written to agents/${ROUTER_AGENT_NAME}.md`);
