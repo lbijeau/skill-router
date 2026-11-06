@@ -1366,6 +1366,63 @@ test("writeSkillCatalog: writes file, counts skills, idempotent", () => {
   clean(root);
 });
 
+
+test("runFlow: skillsHome is injectable, global skill synced there", () => {
+  const root = tmp(); const skillsHome = tmp(); const settings = tmp();
+  const manifest = { repos: [
+    { name: "one", url: "https://github.com/x/y", description: "d", persona: "p" }]};
+  w(root, "repos.json", JSON.stringify(manifest));
+  skill(root, "skills/one/a");
+  gitRepo(path.join(root, "skills/one"));
+  w(root, "global-skills/route-skill/SKILL.md", "---\nname: route-skill\ndescription: d\n---\nbody\n");
+  const r = gen.runInstall(root, path.join(settings, "settings.json"), null, skillsHome);
+  eq(r.exitCode, 0);
+  eq(fs.existsSync(path.join(skillsHome, "route-skill", "SKILL.md")), true);
+  eq(fs.existsSync(path.join(os.homedir(), ".pi/agent/skills/route-skill-test-never")), false);
+  clean(root); clean(skillsHome); clean(settings);
+});
+
+test("statusOf: missing clone gets skip semantics, catalog can be in-sync", () => {
+  const root = tmp();
+  const manifest = { repos: [
+    { name: "one", url: "https://github.com/x/y", description: "d", persona: "p" },
+    { name: "gone", url: "https://github.com/x/y", description: "d", persona: "p" }]};
+  w(root, "repos.json", JSON.stringify(manifest));
+  skill(root, "skills/one/a");
+  gitRepo(path.join(root, "skills/one"));
+  w(root, "agents/one.md", gen.renderAgentFile(manifest.repos[0], ["a"]));
+  const found = gen.discoverSkills(path.join(root, "skills/one"), manifest.repos[0]);
+  w(root, "agents-vibe/one.toml", gen.renderVibeAgentTOML(manifest.repos[0], found.skills));
+  gen.writeSkillCatalog(root, manifest, new Set(["gone"]));
+  gen.writeRouterAgent(root);
+  const r = gen.statusOf(root, manifest);
+  eq(r.catalog, "in-sync");
+  eq(r.rows.find(x => x.name === "gone").clone, "missing");
+  clean(root);
+});
+
+test("printStatus: catalog/router values align under their header columns", () => {
+  const root = tmp();
+  const manifest = { repos: [
+    { name: "one", url: "https://github.com/x/y", description: "d", persona: "p" }]};
+  w(root, "repos.json", JSON.stringify(manifest));
+  skill(root, "skills/one/a");
+  gitRepo(path.join(root, "skills/one"));
+  w(root, "agents/one.md", gen.renderAgentFile(manifest.repos[0], ["a"]));
+  const found = gen.discoverSkills(path.join(root, "skills/one"), manifest.repos[0]);
+  w(root, "agents-vibe/one.toml", gen.renderVibeAgentTOML(manifest.repos[0], found.skills));
+  gen.writeSkillCatalog(root, manifest);
+  gen.writeRouterAgent(root);
+  const lines = gen.printStatus(root, manifest).output.split("\n");
+  const header = lines[0];
+  const values = lines[1];
+  eq(header.indexOf("CATALOG"), 51);
+  eq(values.slice(0, 51).trim(), "");
+  eq(values.slice(51, 61).trim(), "in-sync");
+  eq(values.slice(61).trim(), "in-sync");
+  clean(root);
+});
+
 process.exitCode = await (async () => {
   let failed = 0;
   for (const t of tests) {
