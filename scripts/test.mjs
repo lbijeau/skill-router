@@ -2397,6 +2397,88 @@ test("hasClaudeReadRules and mergeClaudePermissions: a single-slash rule is a di
   clean(base);
 });
 
+// ---- Follow-ups D ----
+function reminderFixture() {
+  const f = claudeFixture({ claudeAgentsDir: false });
+  const report = [];
+  return { f, report, run: impl => gen.runClaudeInstall(f.root, f.claude, report, impl),
+    has: re => report.some(l => re.test(l)) };
+}
+
+test("runClaudeInstall: a step that fails after creating an EMPTY agents dir prints no restart reminder", () => {
+  const t = reminderFixture();
+  t.run({ installClaudeAgents: (root, dir) => { fs.mkdirSync(dir); throw new Error("boom"); } });
+  eq(t.has(/agents install skipped \(boom\)/), true);
+  eq(t.has(/restart Claude Code/), false);
+  clean(t.f.root); clean(t.f.claude);
+});
+
+test("runClaudeInstall: a step that fails after writing an agent still prints the restart reminder", () => {
+  const t = reminderFixture();
+  t.run({ installClaudeAgents: (root, dir) => { fs.mkdirSync(dir); fs.writeFileSync(path.join(dir, "a.md"), "x"); throw new Error("boom"); } });
+  eq(t.has(/agents install skipped \(boom\)/), true);
+  eq(t.has(/restart Claude Code/), true);
+  clean(t.f.root); clean(t.f.claude);
+});
+
+test("runClaudeInstall: /reload-skills only when the skills dir was created and holds something", () => {
+  const empty = reminderFixture();
+  empty.run({ syncClaudeSkills: (root, dir) => { fs.mkdirSync(dir); throw new Error("boom"); } });
+  eq(empty.has(/skills sync skipped \(boom\)/), true);
+  eq(empty.has(/reload-skills/), false);
+  const full = reminderFixture();
+  full.run({ syncClaudeSkills: (root, dir) => { fs.mkdirSync(path.join(dir, "route-skill"), { recursive: true }); throw new Error("boom"); } });
+  eq(full.has(/reload-skills/), true);
+  clean(empty.f.root); clean(empty.f.claude); clean(full.f.root); clean(full.f.claude);
+});
+
+test("hasClaudeReadRules: a first-segment glob is not resolved against the cwd, and a null home falls back instead of throwing", () => {
+  const dir = tmp(); const sp = path.join(dir, "settings.json");
+  fs.writeFileSync(sp, JSON.stringify({ permissions: { allow: ["Read(//**)"] } }));
+  eq(gen.hasClaudeReadRules(sp, ["Read(/" + process.cwd() + "/**)"]), false);
+  eq(gen.hasClaudeReadRules(sp, ["Read(//**)"]), true);
+  let threw = false;
+  try { gen.hasClaudeReadRules(sp, ["Read(~/x/**)"], null); } catch { threw = true; }
+  eq(threw, false);
+  clean(dir);
+});
+
+test("runCli: install with a custom root but no explicit config paths exits 1 and writes nothing", () => {
+  const f = claudeFixture(); const home = tmp();
+  const r = gen.runCli(["install", "--no-claude"], {}, { root: f.root, home });
+  eq(r.exitCode, 1);
+  eq(r.err.some(l => /explicit settingsPath/.test(l)), true);
+  eq(fs.existsSync(path.join(f.root, "agents")), false);                    // nothing generated either
+  clean(f.root); clean(f.claude); clean(home);
+});
+
+test("runInstall and runUpdate: a stale positional call or null throws a TypeError naming the new signature", () => {
+  for (const bad of ["/tmp/settings.json", null, 5]) {
+    for (const fn of [gen.runInstall, gen.runUpdate]) {
+      let err;
+      try { fn(tmp(), bad); } catch (e) { err = e; }
+      eq(err instanceof TypeError, true);
+      eq(/settingsPath/.test(err.message), true);
+    }
+  }
+});
+
+test("generate.mjs re-exports every name of common, discover and claude (no ambiguous star-export is dropped)", async () => {
+  for (const f of ["common", "discover", "claude"]) {
+    const m = await import(`./${f}.mjs`);
+    for (const k of Object.keys(m)) eq(k in gen, true, `${f}.${k} missing from generate`);
+  }
+});
+
+test("install: the pi skills home is pre-created and stays empty after a claude install", () => {
+  const f = claudeFixture({ claudeAgentsDir: true }); const pi = path.join(f.root, "pi-skills-pre");
+  fs.mkdirSync(pi);
+  gen.runInstall(f.root, { settingsPath: f.sp, vibeConfigPath: f.vp, skillsHome: pi, claudeHome: f.claude });
+  eq(fs.readdirSync(pi).length, 0);
+  eq(fs.existsSync(path.join(f.claude, "skills/route-skill/SKILL.md")), true);
+  clean(f.root); clean(f.claude);
+});
+
 process.exitCode = await (async () => {
   let failed = 0;
   for (const t of tests) {

@@ -239,7 +239,7 @@ export function writeSkillCatalog(root, manifest, skip = new Set()) {
 }
 
 export function prune(root, manifest) {
-  const agents = [], clones = [], vibeAgents = [], claudeAgents = [];
+  const agents = [], clones = [], vibeAgents = [];
   const names = new Set(manifest.repos.map(e => e.name));
   const agentsDir = path.join(root, "agents");
   if (fs.existsSync(agentsDir)) {
@@ -274,7 +274,7 @@ export function prune(root, manifest) {
       }
     }
   }
-  claudeAgents.push(...pruneClaudeAgents(root, names));
+  const claudeAgents = pruneClaudeAgents(root, names);
   const skillsDir = path.join(root, "skills");
   if (fs.existsSync(skillsDir)) {
     for (const d of fs.readdirSync(skillsDir, { withFileTypes: true })) {
@@ -792,6 +792,9 @@ const DEFAULT_VIBE_CONFIG = () => path.join(process.env.VIBE_HOME || path.join(o
 // skills dir; `claudeHome` null/undefined skips the Claude install step
 // (generation of agents-claude/ still runs). Only the CLI computes a Claude default.
 function flowPaths(paths) {
+  if (paths === null || typeof paths !== "object") {
+    throw new TypeError("runInstall/runUpdate take (root, { settingsPath, vibeConfigPath, skillsHome, claudeHome })");
+  }
   return { ...paths,
     settingsPath: paths.settingsPath ?? DEFAULT_SETTINGS(),
     vibeConfigPath: paths.vibeConfigPath ?? DEFAULT_VIBE_CONFIG() };
@@ -822,6 +825,10 @@ export function runCli(argv, env, opts = {}) {
       return { exitCode: st.exitCode, out, err };
     }
     if (cmd === "install" || cmd === "update") {
+      if (opts.root && !(opts.settingsPath && opts.vibeConfigPath && opts.skillsHome)) {
+        err.push("runCli: a custom root needs explicit settingsPath, vibeConfigPath and skillsHome (it would otherwise write the real pi and Vibe config)");
+        return { exitCode: 1, out, err };
+      }
       const run = cmd === "install" ? runInstall : runUpdate;
       const r = run(root, { settingsPath: opts.settingsPath, vibeConfigPath: opts.vibeConfigPath,
         skillsHome: opts.skillsHome, claudeHome });
