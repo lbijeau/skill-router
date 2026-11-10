@@ -85,6 +85,8 @@ function skill(root, rel, name) {
 }
 
 const E = (over = {}) => ({ name: "x", url: "https://github.com/x/y", description: "d", persona: "p", ...over });
+// Claude artifacts for hand-built status fixtures (the claude column and router are part of the exit code).
+function writeClaudeArtifacts(root, manifest) { gen.writeClaudeAgentFiles(root, manifest); gen.writeClaudeRouterAgent(root); }
 
 test("discovery: names come from frontmatter, not dir names", () => {
   const root = tmp();
@@ -387,7 +389,7 @@ test("status: exit rules incl. expected absence for zero-skill entries", () => {
   w(root, "agents-vibe/one.toml", gen.renderVibeAgentTOML(manifest.repos[0], found.skills));
   gitRepo(path.join(root, "skills/zero"));           // clone ok, no skills
   gen.writeSkillCatalog(root, manifest);
-  gen.writeRouterAgent(root);
+  gen.writeRouterAgent(root); writeClaudeArtifacts(root, manifest);
   const r = gen.statusOf(root, manifest);
   eq(r.catalog, "in-sync");
   eq(r.router, "in-sync");
@@ -414,7 +416,7 @@ test("status: zero-skill leftover TOML is stale and fails exit", () => {
   w(root, "agents-vibe/one.toml", gen.renderVibeAgentTOML(manifest.repos[0], found.skills));
   gitRepo(path.join(root, "skills/zero"));
   gen.writeSkillCatalog(root, manifest);
-  gen.writeRouterAgent(root);
+  gen.writeRouterAgent(root); writeClaudeArtifacts(root, manifest);
   w(root, "agents-vibe/zero.toml", "leftover");
   const r = gen.statusOf(root, manifest);
   eq(r.rows.find(x => x.name === "zero").vibe, "stale");
@@ -433,7 +435,7 @@ test("status: only-vibe-stale forces exit 1", () => {
   w(root, "agents/one.md", gen.renderAgentFile(manifest.repos[0], ["a"]));
   w(root, "agents-vibe/one.toml", "tampered");
   gen.writeSkillCatalog(root, manifest);
-  gen.writeRouterAgent(root);
+  gen.writeRouterAgent(root); writeClaudeArtifacts(root, manifest);
   const r = gen.statusOf(root, manifest);
   eq(r.rows[0].agent, "in-sync");
   eq(r.rows[0].vibe, "stale");
@@ -453,7 +455,7 @@ test("status: name collision with user agents dir is a warning, not an exit", ()
   w(root, "agents-vibe/one.toml", gen.renderVibeAgentTOML(manifest.repos[0], found.skills));
   w(ua, "one.toml", "user agent");
   gen.writeSkillCatalog(root, manifest);
-  gen.writeRouterAgent(root);
+  gen.writeRouterAgent(root); writeClaudeArtifacts(root, manifest);
   const r = gen.statusOf(root, manifest, { userAgentsDir: ua });
   eq(r.warnings.some(x => /one.*collision/.test(x)), true);
   eq(r.exitCode, 0);
@@ -478,7 +480,7 @@ test("status: stale, missing, dirty, not-a-repo, missing-clone all flagged", () 
   w(root, "skills/dirty/untracked.txt", "x");
   w(root, "skills/fake/junk.txt", "x");           // dir, no .git
   gen.writeSkillCatalog(root, manifest);
-  gen.writeRouterAgent(root);
+  gen.writeRouterAgent(root); writeClaudeArtifacts(root, manifest);
   const r = gen.statusOf(root, manifest);
   const by = n => r.rows.find(x => x.name === n);
   eq(by("stale").agent, "stale"); eq(by("stale").clone, "ok");
@@ -1334,7 +1336,7 @@ test("status: tampered catalog or router is stale and fails exit", () => {
   const found = gen.discoverSkills(path.join(root, "skills/one"), manifest.repos[0]);
   w(root, "agents-vibe/one.toml", gen.renderVibeAgentTOML(manifest.repos[0], found.skills));
   gen.writeSkillCatalog(root, manifest);
-  gen.writeRouterAgent(root);
+  gen.writeRouterAgent(root); writeClaudeArtifacts(root, manifest);
   w(root, "catalog/skill-catalog.md", "tampered");
   let r = gen.statusOf(root, manifest);
   eq(r.catalog, "stale");
@@ -1375,7 +1377,7 @@ test("runFlow: skillsHome is injectable, global skill synced there", () => {
   skill(root, "skills/one/a");
   gitRepo(path.join(root, "skills/one"));
   w(root, "global-skills/route-skill/SKILL.md", "---\nname: route-skill\ndescription: d\n---\nbody\n");
-  const r = gen.runInstall(root, path.join(settings, "settings.json"), null, skillsHome);
+  const r = gen.runInstall(root, path.join(settings, "settings.json"), path.join(settings, "config.toml"), skillsHome);
   eq(r.exitCode, 0);
   eq(fs.existsSync(path.join(skillsHome, "route-skill", "SKILL.md")), true);
   eq(fs.existsSync(path.join(os.homedir(), ".pi/agent/skills/route-skill-test-never")), false);
@@ -1394,7 +1396,7 @@ test("statusOf: missing clone gets skip semantics, catalog can be in-sync", () =
   const found = gen.discoverSkills(path.join(root, "skills/one"), manifest.repos[0]);
   w(root, "agents-vibe/one.toml", gen.renderVibeAgentTOML(manifest.repos[0], found.skills));
   gen.writeSkillCatalog(root, manifest, new Set(["gone"]));
-  gen.writeRouterAgent(root);
+  gen.writeRouterAgent(root); writeClaudeArtifacts(root, manifest);
   const r = gen.statusOf(root, manifest);
   eq(r.catalog, "in-sync");
   eq(r.rows.find(x => x.name === "gone").clone, "missing");
@@ -1412,15 +1414,782 @@ test("printStatus: catalog/router values align under their header columns", () =
   const found = gen.discoverSkills(path.join(root, "skills/one"), manifest.repos[0]);
   w(root, "agents-vibe/one.toml", gen.renderVibeAgentTOML(manifest.repos[0], found.skills));
   gen.writeSkillCatalog(root, manifest);
-  gen.writeRouterAgent(root);
+  gen.writeRouterAgent(root); writeClaudeArtifacts(root, manifest);
   const lines = gen.printStatus(root, manifest).output.split("\n");
   const header = lines[0];
   const values = lines[1];
-  eq(header.indexOf("CATALOG"), 51);
-  eq(values.slice(0, 51).trim(), "");
-  eq(values.slice(51, 61).trim(), "in-sync");
-  eq(values.slice(61).trim(), "in-sync");
+  eq(header.indexOf("CLAUDE"), 51);
+  eq(header.indexOf("CATALOG"), 61);
+  eq(values.slice(0, 61).trim(), "");
+  eq(values.slice(61, 71).trim(), "in-sync");
+  eq(values.slice(71).trim(), "in-sync");
+  eq(lines[2].slice(51, 61).trim(), "in-sync");                       // claude column under its header
+  eq(lines[3], "claude install: n/a");                                // line after the data rows
   clean(root);
+});
+
+// ---- Claude Code target: Task 1 ----
+test("renderRouterAgent: exact bytes (pinned before the claude refactor)", () => {
+  eq(gen.renderRouterAgent({ root: "/x/sr", home: "/x" }),
+    "---\nname: skill-router\ndescription: \"Routes a described situation to the best skill across all pinned repos; returns skill, path, and digest\"\ninheritSkills: false\n---\nYou are the skill router over every repo pinned in this repo's manifest.\nFirst, read the catalog at ~/sr/catalog/skill-catalog.md. It lists every skill in every pinned repo, with a one-line description and the path to its SKILL.md.\n\nMatch the caller's situation to the catalog. When two skills are close, open both SKILL.md files and say which one fits and why the other does not.\n\nOpen the winning SKILL.md and return: the skill name, its path, why it fits, and a short digest of the real file. Never answer from the catalog description alone.\n\nRecommend and stop. Do not execute the skill, edit files, or start the work.\n\nIf nothing fits, say so plainly; do not force a nearest match.\n");
+});
+
+const CE = (over = {}) => ({ name: "a", url: "https://github.com/x/y", description: "d", persona: "p", ...over });
+const CS = [{ name: "s", dir: "/x/sr/skills/a/s", description: "does s" }];
+
+test("renderClaudeAgentFile: exact bytes", () => {
+  eq(gen.renderClaudeAgentFile(CE(), CS, { home: "/x" }),
+    ["---", "name: a", 'description: "d"', "tools: Read, Grep, Glob", "omitClaudeMd: true", "---",
+      "p", "", gen.CLAUDE_BOILERPLATE, "", "- s: does s — ~/sr/skills/a/s/SKILL.md", "",
+      "<!-- generated by skill-router -->", ""].join("\n"));
+});
+
+test("renderClaudeAgentFile: tools line exactly once, no Skill or MCP in frontmatter", () => {
+  const out = gen.renderClaudeAgentFile(CE(), CS, { home: "/x" });
+  const fm = out.split("\n---\n")[0];
+  eq(fm.split("\n").filter(l => l === gen.CLAUDE_TOOLS_LINE).length, 1);
+  eq(/Skill|mcp/i.test(fm), false);
+});
+
+test("renderClaudeAgentFile: skill description with quote and backslash renders verbatim", () => {
+  const out = gen.renderClaudeAgentFile(CE(), [{ name: "s", dir: "/x/sr/s", description: 'say "hi" \\ there' }], { home: "/x" });
+  eq(out.includes('- s: say "hi" \\ there — ~/sr/s/SKILL.md'), true);
+});
+
+test("renderClaudeAgentFile: hostile description stays one YAML line, no injected frontmatter line", () => {
+  const out = gen.renderClaudeAgentFile(CE({ description: 'a "q": b\nc\rd\u0085e\u2028f\u2029g\ntools: Read, Bash' }), CS, { home: "/x" });
+  const fm = out.split("\n---\n")[0];
+  eq(/[\r\u0085\u2028\u2029]/.test(fm), false);
+  eq(fm.split("\n").length, 5);                         // ---, name, description, tools, omitClaudeMd
+  eq(fm.split("\n").filter(l => l.startsWith("tools:")).length, 1);
+  eq(/^description: ".*"$/.test(fm.split("\n")[2]), true);
+});
+
+test("renderClaudeAgentFile: CRLF persona normalized, empty description throws, rows outside home stay absolute", () => {
+  const out = gen.renderClaudeAgentFile(CE({ persona: "l1\r\nl2" }), CS, { home: "/other" });
+  eq(out.includes("\r"), false);
+  eq(out.includes("l1\nl2"), true);
+  eq(out.includes("- s: does s — /x/sr/skills/a/s/SKILL.md"), true);
+  assert.throws(() => gen.renderClaudeAgentFile(CE({ description: "  " }), CS), /description/);
+});
+
+test("isOwnedClaudeAgent: generated true; quoted marker, name mismatch, symlink, missing false", () => {
+  const root = tmp();
+  const good = gen.renderClaudeAgentFile(CE(), CS, { home: "/x" });
+  w(root, "a.md", good);
+  eq(gen.isOwnedClaudeAgent(path.join(root, "a.md")), true);
+  w(root, "q.md", good.replace("name: a", "name: q") + "\nsome text mentioning " + gen.CLAUDE_MARKER + " mid-file\n");
+  eq(gen.isOwnedClaudeAgent(path.join(root, "q.md")), false);
+  w(root, "b.md", good);                                // name: a, stem b
+  eq(gen.isOwnedClaudeAgent(path.join(root, "b.md")), false);
+  fs.symlinkSync(path.join(root, "a.md"), path.join(root, "link.md"));
+  eq(gen.isOwnedClaudeAgent(path.join(root, "link.md")), false);
+  eq(gen.isOwnedClaudeAgent(path.join(root, "nope.md")), false);
+  clean(root);
+});
+
+test("writeClaudeAgentFiles: writes, idempotent, removes zero-skill leftovers, skips failed, warns on reserved and empty", () => {
+  const root = tmp();
+  const manifest = { repos: [CE({ name: "one" }), CE({ name: "zero" }), CE({ name: "bad" }),
+    CE({ name: "plan" }), CE({ name: "nodesc", description: "" })] };
+  skill(root, "skills/one/a"); skill(root, "skills/bad/a"); skill(root, "skills/plan/a"); skill(root, "skills/nodesc/a");
+  fs.mkdirSync(path.join(root, "skills/zero"), { recursive: true });
+  w(root, "agents-claude/zero.md", gen.renderClaudeAgentFile(CE({ name: "zero" }), CS, { home: "/x" }));
+  const r = gen.writeClaudeAgentFiles(root, manifest, new Set(["bad"]));
+  eq(r.written.join(), "one");
+  eq(r.warnings.some(y => /plan/.test(y) && /reserved/.test(y)), true);
+  eq(r.removed.join(), "zero");
+  eq(r.warnings.some(x => /nodesc/.test(x)), true);
+  eq(fs.existsSync(path.join(root, "agents-claude/bad.md")), false);
+  const first = fs.readFileSync(path.join(root, "agents-claude/one.md"), "utf8");
+  gen.writeClaudeAgentFiles(root, manifest, new Set(["bad"]));
+  eq(fs.readFileSync(path.join(root, "agents-claude/one.md"), "utf8"), first);
+  const m2 = { repos: [CE({ name: "skill-router" })] };
+  skill(root, "skills/skill-router/a");
+  const r2 = gen.writeClaudeAgentFiles(root, m2);
+  eq(r2.warnings.some(x => /skill-router/.test(x)), true);
+  eq(r2.written.length, 0);
+  clean(root);
+});
+
+test("renderClaudeRouterAgent: same body as pi router, claude frontmatter, ends with marker", () => {
+  const out = gen.renderClaudeRouterAgent({ root: "/x/sr", home: "/x" });
+  const pi = gen.renderRouterAgent({ root: "/x/sr", home: "/x" });
+  eq(out.startsWith("---\nname: skill-router\ndescription: \"Routes"), true);
+  eq(out.includes("tools: Read, Grep, Glob\nomitClaudeMd: true\n---\n"), true);
+  eq(out.includes("inheritSkills"), false);
+  eq(out.includes(pi.split("\n---\n")[1].trimEnd()), true);
+  eq(out.endsWith(gen.CLAUDE_MARKER + "\n"), true);
+});
+
+test("writeClaudeRouterAgent: writes agents-claude/skill-router.md owned file", () => {
+  const root = tmp();
+  const r = gen.writeClaudeRouterAgent(root);
+  eq(r.written, true);
+  eq(gen.isOwnedClaudeAgent(path.join(root, "agents-claude/skill-router.md")), true);
+  clean(root);
+});
+
+test("prune: removes owned claude agents not in manifest; keeps skill-router, unowned and marker-quoting files", () => {
+  const root = tmp();
+  const manifest = { repos: [CE({ name: "one" })] };
+  w(root, "agents-claude/gone.md", gen.renderClaudeAgentFile(CE({ name: "gone" }), CS, { home: "/x" }));
+  w(root, "agents-claude/mine.md", "hand written\n");
+  w(root, "agents-claude/quote.md", "---\nname: quote\n---\nsee " + gen.CLAUDE_MARKER + " here\n");
+  gen.writeClaudeRouterAgent(root);
+  const r = gen.prune(root, manifest);
+  eq(r.claudeAgents.join(), "gone");
+  eq(fs.existsSync(path.join(root, "agents-claude/gone.md")), false);
+  for (const f of ["mine.md", "quote.md", "skill-router.md"]) eq(fs.existsSync(path.join(root, "agents-claude", f)), true);
+  clean(root);
+});
+
+test("discoverSkills: symlinked SKILL.md is skipped with a warning", () => {
+  const root = tmp();
+  skill(root, "clone/real");
+  fs.mkdirSync(path.join(root, "clone/evil"), { recursive: true });
+  w(root, "secret.txt", "---\nname: evil\ndescription: LEAKED\n---\n");
+  fs.symlinkSync(path.join(root, "secret.txt"), path.join(root, "clone/evil/SKILL.md"));
+  const found = gen.discoverSkills(path.join(root, "clone"), E());
+  eq(found.skills.map(s => s.name).join(), "real");
+  eq(found.warnings.some(x => /symlink/i.test(x) && /evil/.test(x)), true);
+  clean(root);
+});
+
+// ---- Claude Code target: Task 2 ----
+function claudeSrc(root, names) {
+  for (const n of names) w(root, `agents-claude/${n}.md`, gen.renderClaudeAgentFile(CE({ name: n }), CS, { home: "/x" }));
+}
+const tmpFiles = dir => fs.readdirSync(dir).filter(f => f.includes(".tmp-"));
+
+test("validateClaudeAgentSource: accepts generated; rejects missing tools, extra tools line, wrong name, no marker", () => {
+  const good = gen.renderClaudeAgentFile(CE(), CS, { home: "/x" });
+  eq(gen.validateClaudeAgentSource(good, "a"), null);
+  eq(typeof gen.validateClaudeAgentSource(good.replace("tools: Read, Grep, Glob\n", ""), "a"), "string");
+  eq(typeof gen.validateClaudeAgentSource(good.replace("omitClaudeMd: true", "tools: Read, Bash\nomitClaudeMd: true"), "a"), "string");
+  eq(typeof gen.validateClaudeAgentSource(good, "b"), "string");
+  eq(typeof gen.validateClaudeAgentSource(good.replace(gen.CLAUDE_MARKER, ""), "a"), "string");
+  eq(typeof gen.validateClaudeAgentSource(good, "Bad_Name"), "string");
+});
+
+test("installClaudeAgents: installs valid files; second run installs nothing; no tmp files left", () => {
+  const root = tmp(), dest = path.join(tmp(), "agents");
+  claudeSrc(root, ["a", "b"]);
+  const r1 = gen.installClaudeAgents(root, dest);
+  eq(r1.installed.join(), "a,b");
+  eq(fs.readFileSync(path.join(dest, "a.md"), "utf8"), fs.readFileSync(path.join(root, "agents-claude/a.md"), "utf8"));
+  const r2 = gen.installClaudeAgents(root, dest);
+  eq(r2.installed.length, 0);
+  eq(tmpFiles(dest).length, 0);
+  clean(root); clean(path.dirname(dest));
+});
+
+test("installClaudeAgents: unmarked same-name file refused, bytes unchanged", () => {
+  const root = tmp(), dest = path.join(tmp(), "agents");
+  claudeSrc(root, ["a"]);
+  w(path.dirname(dest), "agents/a.md", "mine\n");
+  const r = gen.installClaudeAgents(root, dest);
+  eq(r.refused.join(), "a");
+  eq(r.installed.length, 0);
+  eq(fs.readFileSync(path.join(dest, "a.md"), "utf8"), "mine\n");
+  clean(root); clean(path.dirname(dest));
+});
+
+test("installClaudeAgents: file quoting the marker mid-file is refused", () => {
+  const root = tmp(), dest = path.join(tmp(), "agents");
+  claudeSrc(root, ["a"]);
+  const body = "---\nname: a\n---\nI copy " + gen.CLAUDE_MARKER + " here\nmore\n";
+  w(path.dirname(dest), "agents/a.md", body);
+  const r = gen.installClaudeAgents(root, dest);
+  eq(r.refused.join(), "a");
+  eq(fs.readFileSync(path.join(dest, "a.md"), "utf8"), body);
+  clean(root); clean(path.dirname(dest));
+});
+
+test("installClaudeAgents: symlinked destination (owned target) is refused and target untouched", () => {
+  const root = tmp(), base = tmp(), dest = path.join(base, "agents");
+  claudeSrc(root, ["a"]);
+  const owned = gen.renderClaudeAgentFile(CE(), CS, { home: "/other" });   // different bytes, owned content
+  w(base, "dotfiles/a.md", owned);
+  fs.mkdirSync(dest, { recursive: true });
+  fs.symlinkSync(path.join(base, "dotfiles/a.md"), path.join(dest, "a.md"));
+  const r = gen.installClaudeAgents(root, dest);
+  eq(r.refused.join(), "a");
+  eq(fs.lstatSync(path.join(dest, "a.md")).isSymbolicLink(), true);
+  eq(fs.readFileSync(path.join(base, "dotfiles/a.md"), "utf8"), owned);
+  clean(root); clean(base);
+});
+
+test("installClaudeAgents: invalid sources are reported and not installed", () => {
+  const root = tmp(), dest = path.join(tmp(), "agents");
+  claudeSrc(root, ["a", "b"]);
+  w(root, "agents-claude/b.md", fs.readFileSync(path.join(root, "agents-claude/b.md"), "utf8").replace("tools: Read, Grep, Glob\n", ""));
+  const r = gen.installClaudeAgents(root, dest);
+  eq(r.installed.join(), "a");
+  eq(r.invalid.map(x => x.name).join(), "b");
+  eq(fs.existsSync(path.join(dest, "b.md")), false);
+  clean(root); clean(path.dirname(dest));
+});
+
+test("installClaudeAgents: owned file whose source is gone is pruned; unowned orphan kept", () => {
+  const root = tmp(), dest = path.join(tmp(), "agents");
+  claudeSrc(root, ["a", "gone"]);
+  gen.installClaudeAgents(root, dest);
+  fs.rmSync(path.join(root, "agents-claude/gone.md"));
+  w(path.dirname(dest), "agents/hand.md", "hand\n");
+  const r = gen.installClaudeAgents(root, dest);
+  eq(r.pruned.join(), "gone");
+  eq(fs.existsSync(path.join(dest, "gone.md")), false);
+  eq(fs.existsSync(path.join(dest, "hand.md")), true);
+  clean(root); clean(path.dirname(dest));
+});
+
+test("installClaudeAgents: empty or absent source prunes nothing and sets pruneSkipped", () => {
+  const root = tmp(), dest = path.join(tmp(), "agents");
+  claudeSrc(root, ["a"]);
+  gen.installClaudeAgents(root, dest);
+  fs.rmSync(path.join(root, "agents-claude"), { recursive: true });
+  const r = gen.installClaudeAgents(root, dest);
+  eq(r.pruneSkipped, true);
+  eq(r.pruned.length, 0);
+  eq(fs.existsSync(path.join(dest, "a.md")), true);
+  clean(root); clean(path.dirname(dest));
+});
+
+test("installClaudeAgents: stale owned file is overwritten", () => {
+  const root = tmp(), dest = path.join(tmp(), "agents");
+  claudeSrc(root, ["a"]);
+  gen.installClaudeAgents(root, dest);
+  w(root, "agents-claude/a.md", gen.renderClaudeAgentFile(CE({ persona: "new persona" }), CS, { home: "/x" }));
+  const r = gen.installClaudeAgents(root, dest);
+  eq(r.installed.join(), "a");
+  eq(fs.readFileSync(path.join(dest, "a.md"), "utf8").includes("new persona"), true);
+  eq(tmpFiles(dest).length, 0);
+  clean(root); clean(path.dirname(dest));
+});
+
+test("installClaudeAgents: dirCreated only when the agents dir did not exist", () => {
+  const root = tmp(), dest = path.join(tmp(), "agents");
+  claudeSrc(root, ["a"]);
+  eq(gen.installClaudeAgents(root, dest).dirCreated, true);
+  eq(gen.installClaudeAgents(root, dest).dirCreated, false);
+  clean(root); clean(path.dirname(dest));
+});
+
+test("claudeAgentsInstallState: in-sync, then stale for missing dir/file, differing file, owned orphan; refused is not stale", () => {
+  const root = tmp(), dest = path.join(tmp(), "agents");
+  claudeSrc(root, ["a", "b"]);
+  eq(gen.claudeAgentsInstallState(root, dest).state, "stale");              // dir missing
+  gen.installClaudeAgents(root, dest);
+  eq(gen.claudeAgentsInstallState(root, dest).state, "in-sync");
+  fs.rmSync(path.join(dest, "b.md"));
+  eq(gen.claudeAgentsInstallState(root, dest).state, "stale");              // missing file
+  gen.installClaudeAgents(root, dest);
+  fs.appendFileSync(path.join(dest, "a.md"), "\n");
+  eq(gen.claudeAgentsInstallState(root, dest).state, "stale");              // differing
+  gen.installClaudeAgents(root, dest);
+  fs.rmSync(path.join(root, "agents-claude/b.md"));
+  eq(gen.claudeAgentsInstallState(root, dest).state, "stale");              // owned orphan
+  gen.installClaudeAgents(root, dest);
+  eq(gen.claudeAgentsInstallState(root, dest).state, "in-sync");
+  fs.rmSync(path.join(dest, "a.md")); w(path.dirname(dest), "agents/a.md", "mine\n");
+  const st = gen.claudeAgentsInstallState(root, dest);
+  eq(st.state, "in-sync");
+  eq(st.refused.join(), "a");
+  clean(root); clean(path.dirname(dest));
+});
+
+// ---- Claude Code target: Task 3 ----
+const RULES = ["Read(~/sr/skills/**)", "Read(~/sr/catalog/**)"];
+const readJson = f => JSON.parse(fs.readFileSync(f, "utf8"));
+
+test("claudeReadRules: under home is ~-relative for skills and catalog", () => {
+  const home = tmp(); const root = path.join(home, "repositories/sr");
+  fs.mkdirSync(root, { recursive: true });
+  const r = gen.claudeReadRules(root, home);
+  eq(r.error, undefined);
+  eq(r.rules.join("|"), "Read(~/repositories/sr/skills/**)|Read(~/repositories/sr/catalog/**)");
+  clean(home);
+});
+
+test("claudeReadRules: outside home is //-absolute; metacharacter path errors; symlinked checkout resolves to real path", () => {
+  const home = tmp(), base = tmp(); const root = path.join(base, "sr");
+  fs.mkdirSync(root, { recursive: true });
+  const real = fs.realpathSync(root);
+  eq(gen.claudeReadRules(root, home).rules[0], `Read(/${real}/skills/**)`);
+  eq(gen.claudeReadRules(root, home).rules[0].startsWith("Read(//"), true);
+  const weird = path.join(base, "we(ird"); fs.mkdirSync(weird);
+  const bad = gen.claudeReadRules(weird, home);
+  eq(bad.rules.length, 0);
+  eq(/metachar/i.test(bad.error), true);
+  fs.symlinkSync(root, path.join(base, "link"));
+  eq(gen.claudeReadRules(path.join(base, "link"), home).rules[0], `Read(/${real}/skills/**)`);
+  clean(home); clean(base);
+});
+
+test("mergeClaudePermissions: creates missing file with exactly permissions.allow", () => {
+  const dir = tmp(); const sp = path.join(dir, "settings.json");
+  const r = gen.mergeClaudePermissions(sp, RULES);
+  eq(r.changed, true);
+  eq(JSON.stringify(readJson(sp)), JSON.stringify({ permissions: { allow: RULES } }));
+  clean(dir);
+});
+
+test("mergeClaudePermissions: appends, keeps other keys, .bak 0600, preserves mode, idempotent", () => {
+  const dir = tmp(); const sp = path.join(dir, "settings.json");
+  const orig = JSON.stringify({ env: { A: "1" }, permissions: { allow: ["Bash(ls)"], deny: ["X"] } }, null, 2) + "\n";
+  fs.writeFileSync(sp, orig); fs.chmodSync(sp, 0o640);
+  const r = gen.mergeClaudePermissions(sp, RULES);
+  eq(r.changed, true);
+  eq(r.added.join("|"), RULES.join("|"));
+  const j = readJson(sp);
+  eq(j.env.A, "1"); eq(j.permissions.deny[0], "X");
+  eq(j.permissions.allow.join("|"), ["Bash(ls)", ...RULES].join("|"));
+  eq(fs.readFileSync(sp + ".bak", "utf8"), orig);
+  eq(fs.statSync(sp + ".bak").mode & 0o777, 0o600);
+  eq(fs.statSync(sp).mode & 0o777, 0o640);
+  eq(gen.mergeClaudePermissions(sp, RULES).changed, false);
+  clean(dir);
+});
+
+test("mergeClaudePermissions: equivalent ~ and // spellings count as present", () => {
+  const dir = tmp(); const sp = path.join(dir, "settings.json");
+  const abs = "Read(/" + path.join(os.homedir(), "sr/skills/**") + ")";    // //Users/... form
+  fs.writeFileSync(sp, JSON.stringify({ permissions: { allow: [abs] } }));
+  const r = gen.mergeClaudePermissions(sp, ["Read(~/sr/skills/**)"]);
+  eq(r.changed, false);
+  clean(dir);
+});
+
+test("mergeClaudePermissions: unparseable, bad top level, bad permissions, bad allow are untouched with an error", () => {
+  const cases = ["{ not json", "null", "[1]", '"str"', '{"permissions":"x"}', '{"permissions":{"allow":{"a":1}}}'];
+  for (const body of cases) {
+    const dir = tmp(); const sp = path.join(dir, "settings.json");
+    fs.writeFileSync(sp, body);
+    const r = gen.mergeClaudePermissions(sp, RULES);
+    eq(r.changed, false);
+    eq(typeof r.error, "string");
+    eq(fs.readFileSync(sp, "utf8"), body);
+    eq(fs.existsSync(sp + ".bak"), false);
+    clean(dir);
+  }
+});
+
+test("mergeClaudePermissions: symlinked settings.json is edited at its target and stays a symlink", () => {
+  const dir = tmp(); const real = path.join(dir, "dot/settings.json"); const link = path.join(dir, "settings.json");
+  w(dir, "dot/settings.json", "{}\n");
+  fs.symlinkSync(real, link);
+  gen.mergeClaudePermissions(link, RULES);
+  eq(fs.lstatSync(link).isSymbolicLink(), true);
+  eq(readJson(real).permissions.allow.length, 2);
+  clean(dir);
+});
+
+test("mergeClaudePermissions: aborts without writing when the file changes mid-merge", () => {
+  const dir = tmp(); const sp = path.join(dir, "settings.json");
+  fs.writeFileSync(sp, "{}\n");
+  const r = gen.mergeClaudePermissions(sp, RULES, { onBeforeCommit: () => fs.writeFileSync(sp, '{"other":true}\n') });
+  eq(r.changed, false);
+  eq(/changed/.test(r.error), true);
+  eq(fs.readFileSync(sp, "utf8"), '{"other":true}\n');
+  clean(dir);
+});
+
+test("hasClaudeReadRules: true when all present, false when partial, missing or unparseable", () => {
+  const dir = tmp(); const sp = path.join(dir, "settings.json");
+  eq(gen.hasClaudeReadRules(sp, RULES), false);
+  fs.writeFileSync(sp, "{ nope");
+  eq(gen.hasClaudeReadRules(sp, RULES), false);
+  fs.writeFileSync(sp, JSON.stringify({ permissions: { allow: [RULES[0]] } }));
+  eq(gen.hasClaudeReadRules(sp, RULES), false);
+  fs.writeFileSync(sp, JSON.stringify({ permissions: { allow: RULES } }));
+  eq(gen.hasClaudeReadRules(sp, RULES), true);
+  clean(dir);
+});
+
+test("global-skills-claude/route-skill: frontmatter, marker comment and literal subagent_type", () => {
+  const body = fs.readFileSync(path.join(gen.REPO_ROOT, "global-skills-claude/route-skill/SKILL.md"), "utf8");
+  eq(body.startsWith("---\nname: route-skill\n"), true);
+  eq(body.includes(gen.GLOBAL_SKILL_MARKER), true);
+  eq(body.includes("subagent_type: skill-router"), true);
+});
+
+test("syncClaudeSkills: writes route-skill; refuses unmarked file and symlinked destination; reports dirCreated", () => {
+  const root = tmp(), home = path.join(tmp(), "skills");
+  const src = fs.readFileSync(path.join(gen.REPO_ROOT, "global-skills-claude/route-skill/SKILL.md"), "utf8");
+  w(root, "global-skills-claude/route-skill/SKILL.md", src);
+  const r1 = gen.syncClaudeSkills(root, home);
+  eq(r1.written.join(), "route-skill"); eq(r1.dirCreated, true);
+  eq(fs.readFileSync(path.join(home, "route-skill/SKILL.md"), "utf8"), src);
+  eq(gen.syncClaudeSkills(root, home).dirCreated, false);
+  fs.writeFileSync(path.join(home, "route-skill/SKILL.md"), "my own skill\n");
+  const r2 = gen.syncClaudeSkills(root, home);
+  eq(r2.refused.join(), "route-skill"); eq(r2.written.length, 0);
+  eq(fs.readFileSync(path.join(home, "route-skill/SKILL.md"), "utf8"), "my own skill\n");
+  fs.rmSync(path.join(home, "route-skill/SKILL.md"));
+  w(path.dirname(home), "elsewhere/SKILL.md", src);
+  fs.symlinkSync(path.join(path.dirname(home), "elsewhere/SKILL.md"), path.join(home, "route-skill/SKILL.md"));
+  const r3 = gen.syncClaudeSkills(root, home);
+  eq(r3.refused.join(), "route-skill");
+  eq(fs.lstatSync(path.join(home, "route-skill/SKILL.md")).isSymbolicLink(), true);
+  clean(root); clean(path.dirname(home));
+});
+
+test("syncClaudeSkills: nothing is written under a pi skills home", () => {
+  const root = tmp(), home = path.join(tmp(), "claude-skills"), pi = tmp();
+  w(root, "global-skills-claude/route-skill/SKILL.md", "---\nname: route-skill\n---\n" + gen.GLOBAL_SKILL_HEADER + " -->\n");
+  gen.syncClaudeSkills(root, home);
+  eq(fs.readdirSync(pi).length, 0);
+  clean(root); clean(path.dirname(home)); clean(pi);
+});
+
+test("claudeSkillsState: in-sync, stale when differing, stale when missing", () => {
+  const root = tmp(), home = path.join(tmp(), "skills");
+  w(root, "global-skills-claude/route-skill/SKILL.md", "---\nname: route-skill\n---\n" + gen.GLOBAL_SKILL_HEADER + " -->\n");
+  eq(gen.claudeSkillsState(root, home), "stale");
+  gen.syncClaudeSkills(root, home);
+  eq(gen.claudeSkillsState(root, home), "in-sync");
+  fs.appendFileSync(path.join(home, "route-skill/SKILL.md"), "x");
+  eq(gen.claudeSkillsState(root, home), "stale");
+  clean(root); clean(path.dirname(home));
+});
+
+// ---- Claude Code target: Task 4 ----
+function claudeFixture({ names = ["a"], claudeAgentsDir = false } = {}) {
+  const root = tmp(); const remote = bareRemote(root); remote.add(path.join("skills", "one"), "one");
+  w(root, "repos.json", JSON.stringify({ repos: names.map(n => ({ name: n, url: remote.url, description: "d", persona: "p" })) }));
+  fs.mkdirSync(path.join(root, "global-skills-claude/route-skill"), { recursive: true });
+  fs.copyFileSync(path.join(gen.REPO_ROOT, "global-skills-claude/route-skill/SKILL.md"),
+    path.join(root, "global-skills-claude/route-skill/SKILL.md"));
+  const claude = tmp();
+  if (claudeAgentsDir) fs.mkdirSync(path.join(claude, "agents"));
+  return { root, claude, sp: path.join(root, "settings.json"), vp: path.join(root, "config.toml") };
+}
+const lineOf = (report, re) => report.find(l => re.test(l));
+
+test("install: generates agents-claude, installs into an existing claude home, adds rules, syncs route-skill", () => {
+  const f = claudeFixture({ names: ["a"], claudeAgentsDir: true });
+  const r = gen.runInstall(f.root, f.sp, f.vp, undefined, f.claude);
+  eq(r.exitCode, 0);
+  eq(gen.isOwnedClaudeAgent(path.join(f.root, "agents-claude/a.md")), true);
+  eq(gen.isOwnedClaudeAgent(path.join(f.claude, "agents/a.md")), true);
+  eq(gen.isOwnedClaudeAgent(path.join(f.claude, "agents/skill-router.md")), true);
+  eq(gen.hasClaudeReadRules(path.join(f.claude, "settings.json"), gen.claudeReadRules(f.root).rules), true);
+  eq(fs.existsSync(path.join(f.claude, "skills/route-skill/SKILL.md")), true);
+  eq(Boolean(lineOf(r.report, /^claude: agents installed: .*\ba\b/)), true);
+  eq(Boolean(lineOf(r.report, /^claude: allow rules added/)), true);
+  eq(Boolean(lineOf(r.report, /^claude: skills synced: route-skill/)), true);
+  eq(Boolean(lineOf(r.report, /^a: cloned, 1 skills, agent written \(pi, vibe\)$/)), true);   // claude is not appended here
+  clean(f.root); clean(f.claude);
+});
+
+test("install: a repo removed from the manifest is gone from claude agents after one run", () => {
+  const f = claudeFixture({ names: ["a", "b"], claudeAgentsDir: true });
+  gen.runInstall(f.root, f.sp, f.vp, undefined, f.claude);
+  eq(fs.existsSync(path.join(f.claude, "agents/b.md")), true);
+  const m = JSON.parse(fs.readFileSync(path.join(f.root, "repos.json"), "utf8"));
+  m.repos = m.repos.filter(x => x.name === "a");
+  w(f.root, "repos.json", JSON.stringify(m));
+  gen.runInstall(f.root, f.sp, f.vp, undefined, f.claude);
+  eq(fs.existsSync(path.join(f.claude, "agents/b.md")), false);
+  eq(fs.existsSync(path.join(f.root, "agents-claude/b.md")), false);
+  eq(fs.existsSync(path.join(f.claude, "agents/a.md")), true);
+  clean(f.root); clean(f.claude);
+});
+
+test("install: claude home absent is skipped with one note, exit 0, directory not created", () => {
+  const f = claudeFixture();
+  const missing = path.join(f.claude, "nope");
+  const r = gen.runInstall(f.root, f.sp, f.vp, undefined, missing);
+  eq(r.exitCode, 0);
+  eq(fs.existsSync(missing), false);
+  eq(r.report.filter(l => /^claude: skipped/.test(l)).length, 1);
+  eq(fs.existsSync(path.join(f.root, "agents-claude/a.md")), true);     // generation still runs
+  clean(f.root); clean(f.claude);
+});
+
+test("install: claudeHome undefined or null writes nothing under HOME and prints no claude: lines", () => {
+  const home = tmp(); const saved = process.env.HOME; process.env.HOME = home;
+  try {
+    for (const arg of [undefined, null]) {
+      const f = claudeFixture();
+      const r = arg === undefined ? gen.runInstall(f.root, f.sp, f.vp, path.join(f.root, "pi-skills"))
+        : gen.runInstall(f.root, f.sp, f.vp, path.join(f.root, "pi-skills"), null);
+      eq(r.report.some(l => /^claude:/.test(l)), false);
+      eq(fs.existsSync(path.join(home, ".claude")), false);
+      clean(f.root); clean(f.claude);
+    }
+  } finally { process.env.HOME = saved; clean(home); }
+});
+
+test("install: restart reminder only when agents dir created; /reload-skills only when skills dir created", () => {
+  const f = claudeFixture();
+  const r1 = gen.runInstall(f.root, f.sp, f.vp, undefined, f.claude);
+  eq(Boolean(lineOf(r1.report, /^reminder: .*restart Claude Code/)), true);
+  eq(Boolean(lineOf(r1.report, /^reminder: .*\/reload-skills/)), true);
+  const r2 = gen.runInstall(f.root, f.sp, f.vp, undefined, f.claude);
+  eq(Boolean(lineOf(r2.report, /restart Claude Code/)), false);
+  eq(Boolean(lineOf(r2.report, /\/reload-skills/)), false);
+  clean(f.root); clean(f.claude);
+});
+
+test("install: unmarked same-name claude agent is refused and reported, exit unaffected", () => {
+  const f = claudeFixture({ claudeAgentsDir: true });
+  w(f.claude, "agents/a.md", "mine\n");
+  const r = gen.runInstall(f.root, f.sp, f.vp, undefined, f.claude);
+  eq(r.exitCode, 0);
+  eq(fs.readFileSync(path.join(f.claude, "agents/a.md"), "utf8"), "mine\n");
+  eq(Boolean(lineOf(r.report, /^claude: refused .*a\.md/)), true);
+  clean(f.root); clean(f.claude);
+});
+
+test("install: unparseable claude settings prints the exact remedy with both rules", () => {
+  const f = claudeFixture({ claudeAgentsDir: true });
+  w(f.claude, "settings.json", "{ nope");
+  const r = gen.runInstall(f.root, f.sp, f.vp, undefined, f.claude);
+  eq(r.exitCode, 0);
+  eq(fs.readFileSync(path.join(f.claude, "settings.json"), "utf8"), "{ nope");
+  eq(Boolean(lineOf(r.report, /^claude: allow rules skipped \(.*unparseable/)), true);
+  const remedy = lineOf(r.report, /^claude: add manually/);
+  for (const rule of gen.claudeReadRules(f.root).rules) eq(remedy.includes(rule), true);
+  clean(f.root); clean(f.claude);
+});
+
+test("resolveClaudeHome: relative, missing and non-directory error; empty falls back; default is <home>/.claude", () => {
+  const d = tmp(); fs.writeFileSync(path.join(d, "f"), "x");
+  eq(typeof gen.resolveClaudeHome({ CLAUDE_CONFIG_DIR: "rel/dir" }, "/h").error, "string");
+  eq(typeof gen.resolveClaudeHome({ CLAUDE_CONFIG_DIR: path.join(d, "nope") }, "/h").error, "string");
+  eq(typeof gen.resolveClaudeHome({ CLAUDE_CONFIG_DIR: path.join(d, "f") }, "/h").error, "string");
+  eq(gen.resolveClaudeHome({ CLAUDE_CONFIG_DIR: "" }, "/h").dir, path.join("/h", ".claude"));
+  eq(gen.resolveClaudeHome({}, "/h").dir, path.join("/h", ".claude"));
+  eq(gen.resolveClaudeHome({ CLAUDE_CONFIG_DIR: d }, "/h").dir, d);
+  clean(d);
+});
+
+function statusFixture() {
+  const root = tmp();
+  const manifest = { repos: [{ name: "one", url: "https://github.com/x/y", description: "d", persona: "p" },
+    { name: "zero", url: "https://github.com/x/y", description: "d", persona: "p" }] };
+  w(root, "repos.json", JSON.stringify(manifest));
+  skill(root, "skills/one/a"); gitRepo(path.join(root, "skills/one")); gitRepo(path.join(root, "skills/zero"));
+  gen.writeAgentFiles(root, manifest); gen.writeVibeAgentFiles(root, manifest);
+  gen.writeSkillCatalog(root, manifest); gen.writeRouterAgent(root); writeClaudeArtifacts(root, manifest);
+  return { root, manifest };
+}
+
+test("status: claude column in-sync, stale, missing, and — for zero skills", () => {
+  const { root, manifest } = statusFixture();
+  let r = gen.statusOf(root, manifest);
+  eq(r.rows.find(x => x.name === "one").claude, "in-sync");
+  eq(r.rows.find(x => x.name === "zero").claude, "—");
+  eq(r.exitCode, 0);
+  fs.appendFileSync(path.join(root, "agents-claude/one.md"), "x");
+  eq(gen.statusOf(root, manifest).rows[0].claude, "stale");
+  fs.rmSync(path.join(root, "agents-claude/one.md"));
+  r = gen.statusOf(root, manifest);
+  eq(r.rows[0].claude, "missing");
+  eq(r.exitCode, 1);
+  clean(root);
+});
+
+test("status: claudeRouter stale on its own forces exit 1", () => {
+  const { root, manifest } = statusFixture();
+  w(root, "agents-claude/skill-router.md", "tampered");
+  const r = gen.statusOf(root, manifest);
+  eq(r.claudeRouter, "stale");
+  eq(r.router, "in-sync"); eq(r.catalog, "in-sync");
+  eq(r.rows.every(x => x.agent === "in-sync" && (x.claude === "in-sync" || x.claude === "—")), true);
+  eq(r.exitCode, 1);
+  clean(root);
+});
+
+test("status: claudeInstall n/a without claudeHome or when it does not exist", () => {
+  const { root, manifest } = statusFixture();
+  eq(gen.statusOf(root, manifest).claudeInstall, "n/a");
+  eq(gen.statusOf(root, manifest, { claudeHome: path.join(root, "nope") }).claudeInstall, "n/a");
+  eq(gen.statusOf(root, manifest, { claudeHome: path.join(root, "nope") }).exitCode, 0);
+  clean(root);
+});
+
+test("status: claudeInstall stale/in-sync across copies, rules and route-skill; refused is a warning", () => {
+  const { root, manifest } = statusFixture();
+  fs.mkdirSync(path.join(root, "global-skills-claude/route-skill"), { recursive: true });
+  fs.copyFileSync(path.join(gen.REPO_ROOT, "global-skills-claude/route-skill/SKILL.md"), path.join(root, "global-skills-claude/route-skill/SKILL.md"));
+  const claude = tmp(); const sp = path.join(claude, "settings.json");
+  const st = () => gen.statusOf(root, manifest, { claudeHome: claude });
+  eq(st().claudeInstall, "stale");                                        // nothing installed yet
+  gen.installClaudeAgents(root, path.join(claude, "agents"));
+  eq(st().claudeInstall, "stale");                                        // rules and route-skill missing
+  gen.mergeClaudePermissions(sp, gen.claudeReadRules(root).rules);
+  eq(st().claudeInstall, "stale");                                        // route-skill missing
+  gen.syncClaudeSkills(root, path.join(claude, "skills"));
+  let r = st();
+  eq(r.claudeInstall, "in-sync"); eq(r.exitCode, 0);
+  fs.appendFileSync(path.join(claude, "agents/one.md"), "\n");
+  eq(st().claudeInstall, "stale"); eq(st().exitCode, 1);
+  gen.installClaudeAgents(root, path.join(claude, "agents"));
+  fs.rmSync(path.join(claude, "agents/one.md")); w(claude, "agents/one.md", "mine\n");
+  r = st();
+  eq(r.claudeInstall, "in-sync");
+  eq(r.warnings.some(x => /one/.test(x) && /not generated/.test(x)), true);
+  fs.writeFileSync(sp, "{ bad");
+  r = st();
+  eq(r.claudeInstall, "in-sync");                                         // unparseable settings: warning, not stale
+  eq(r.warnings.some(x => /unparseable/.test(x)), true);
+  clean(root); clean(claude);
+});
+
+// ---- Claude Code target: final-review fixes ----
+test("install: filesystem errors in the claude block are reported, never thrown (agents file, settings dir, skill dir)", () => {
+  const cases = {
+    "agents is a regular file": f => w(f.claude, "agents", "not a dir"),
+    "agents is a dangling symlink": f => fs.symlinkSync(path.join(f.claude, "nowhere"), path.join(f.claude, "agents")),
+    "settings.json is a directory": f => fs.mkdirSync(path.join(f.claude, "settings.json")),
+    "route-skill SKILL.md is a directory": f => fs.mkdirSync(path.join(f.claude, "skills/route-skill/SKILL.md"), { recursive: true }),
+  };
+  for (const [name, setup] of Object.entries(cases)) {
+    const f = claudeFixture();
+    setup(f);
+    let r;
+    try { r = gen.runInstall(f.root, f.sp, f.vp, undefined, f.claude); }
+    catch (e) { assert.fail(`${name}: install threw ${e.message}`); }
+    eq(r.exitCode, 0, name);
+    const expect = name.startsWith("route-skill") ? /^claude: refused skill route-skill/ : /^claude: .*skipped \(/;
+    eq(r.report.some(l => expect.test(l)), true, name);
+    eq(r.report.some(l => /^a: cloned/.test(l)), true, name);          // the rest of the report survives
+    clean(f.root); clean(f.claude);
+  }
+});
+
+test("status: a filesystem error in the claude block is a warning and stale, never a throw", () => {
+  const { root, manifest } = statusFixture();
+  const claude = tmp(); w(claude, "agents", "not a dir");
+  let r;
+  try { r = gen.statusOf(root, manifest, { claudeHome: claude }); }
+  catch (e) { assert.fail(`statusOf threw ${e.message}`); }
+  eq(r.claudeInstall, "stale");
+  eq(r.warnings.some(x => /^claude:/.test(x)), true);
+  clean(root); clean(claude);
+});
+
+test("status: a user's own route-skill is refused by install and is a warning, not stale, in status", () => {
+  const { root, manifest } = statusFixture();
+  w(root, "global-skills-claude/route-skill/SKILL.md", fs.readFileSync(path.join(gen.REPO_ROOT, "global-skills-claude/route-skill/SKILL.md"), "utf8"));
+  const claude = tmp(); const sp = path.join(claude, "settings.json");
+  gen.installClaudeAgents(root, path.join(claude, "agents"));
+  gen.mergeClaudePermissions(sp, gen.claudeReadRules(root).rules);
+  w(claude, "skills/route-skill/SKILL.md", "my own skill\n");
+  eq(gen.syncClaudeSkills(root, path.join(claude, "skills")).refused.join(), "route-skill");
+  eq(gen.claudeSkillsState(root, path.join(claude, "skills")), "in-sync");
+  eq(gen.claudeSkillsRefused(root, path.join(claude, "skills")).join(), "route-skill");
+  const r = gen.statusOf(root, manifest, { claudeHome: claude });
+  eq(r.claudeInstall, "in-sync"); eq(r.exitCode, 0);
+  eq(r.warnings.some(x => /route-skill/.test(x) && /not generated/.test(x)), true);
+  clean(root); clean(claude);
+});
+
+test("mergeClaudePermissions: a dangling symlinked settings.json is left alone with an error", () => {
+  const dir = tmp(); const link = path.join(dir, "settings.json");
+  fs.symlinkSync(path.join(dir, "not-mounted/settings.json"), link);
+  const r = gen.mergeClaudePermissions(link, RULES);
+  eq(r.changed, false);
+  eq(/dangling/.test(r.error), true);
+  eq(fs.lstatSync(link).isSymbolicLink(), true);
+  clean(dir);
+});
+
+test("printStatus: a stale claude router is shown, not only in the exit code", () => {
+  const { root, manifest } = statusFixture();
+  w(root, "agents-claude/skill-router.md", "tampered");
+  const st = gen.printStatus(root, manifest);
+  eq(st.exitCode, 1);
+  eq(st.output.includes("claude router: stale"), true);
+  clean(root);
+});
+
+// ---- PR review fixes ----
+test("validateClaudeAgentSource: any extra or malformed frontmatter key is rejected", () => {
+  const good = gen.renderClaudeAgentFile(CE(), CS, { home: "/x" });
+  eq(gen.validateClaudeAgentSource(good, "a"), null);
+  for (const extra of ["permissionMode: bypassPermissions", "hooks:", "mcpServers:", "skills: x",
+    " tools: Bash", '"tools": "*"', "model: opus"]) {
+    const bad = good.replace("omitClaudeMd: true", "omitClaudeMd: true\n" + extra);
+    eq(typeof gen.validateClaudeAgentSource(bad, "a"), "string", extra);
+  }
+  eq(typeof gen.validateClaudeAgentSource(good.replace("omitClaudeMd: true\n", ""), "a"), "string");
+  eq(typeof gen.validateClaudeAgentSource(good.replace("omitClaudeMd: true", "omitClaudeMd: false"), "a"), "string");
+});
+
+test("installClaudeAgents: a source with an extra permission key is invalid and never installed", () => {
+  const root = tmp(), dest = path.join(tmp(), "agents");
+  claudeSrc(root, ["a"]);
+  const f = path.join(root, "agents-claude/a.md");
+  fs.writeFileSync(f, fs.readFileSync(f, "utf8").replace("omitClaudeMd: true", "omitClaudeMd: true\npermissionMode: bypassPermissions"));
+  const r = gen.installClaudeAgents(root, dest);
+  eq(r.installed.length, 0);
+  eq(r.invalid.map(x => x.name).join(), "a");
+  eq(fs.existsSync(path.join(dest, "a.md")), false);
+  clean(root); clean(path.dirname(dest));
+});
+
+test("status: a bad CLAUDE_CONFIG_DIR is an error state with exit 1, shown in the output", () => {
+  const { root, manifest } = statusFixture();
+  const err = "CLAUDE_CONFIG_DIR must be an absolute path: ~/cfg";
+  const r = gen.statusOf(root, manifest, { claudeError: err });
+  eq(r.claudeInstall, "error");
+  eq(r.exitCode, 1);
+  eq(r.warnings.some(x => x.includes(err)), true);
+  const st = gen.printStatus(root, manifest, { claudeError: err });
+  eq(st.exitCode, 1);
+  eq(st.output.includes("claude install: error"), true);
+  eq(st.output.includes(err), true);
+  clean(root);
+});
+
+test("writeClaudeAgentFiles: an entry that gains a skip reason has its owned file removed; unowned file and the router stay", () => {
+  const root = tmp();
+  skill(root, "skills/foo/a"); skill(root, "skills/skill-router/a");
+  const m1 = { repos: [CE({ name: "foo" })] };
+  gen.writeClaudeAgentFiles(root, m1);
+  gen.writeClaudeRouterAgent(root);
+  eq(gen.isOwnedClaudeAgent(path.join(root, "agents-claude/foo.md")), true);
+  const m2 = { repos: [CE({ name: "foo", description: "   " }), CE({ name: "skill-router" })] };
+  const r = gen.writeClaudeAgentFiles(root, m2);
+  eq(r.removed.join(), "foo");
+  eq(r.warnings.length, 2);
+  eq(fs.existsSync(path.join(root, "agents-claude/foo.md")), false);
+  eq(gen.isOwnedClaudeAgent(path.join(root, "agents-claude/skill-router.md")), true);   // router never deleted
+  w(root, "agents-claude/foo.md", "hand written\n");
+  gen.writeClaudeAgentFiles(root, m2);
+  eq(fs.readFileSync(path.join(root, "agents-claude/foo.md"), "utf8"), "hand written\n");
+  clean(root);
+});
+
+test("status: an owned leftover for an entry with a skip reason is stale; no file is —", () => {
+  const root = tmp();
+  skill(root, "skills/foo/a"); gitRepo(path.join(root, "skills/foo"));
+  const manifest = { repos: [CE({ name: "foo", description: "  " })] };
+  w(root, "agents-claude/foo.md", gen.renderClaudeAgentFile(CE({ name: "foo" }), CS, { home: "/x" }));
+  eq(gen.statusOf(root, manifest).rows[0].claude, "stale");
+  fs.rmSync(path.join(root, "agents-claude/foo.md"));
+  eq(gen.statusOf(root, manifest).rows[0].claude, "—");
+  clean(root);
+});
+
+test("syncClaudeSkills: a user file that only mentions the marker phrase is refused; the real header at the top is owned", () => {
+  const root = tmp(), home = path.join(tmp(), "skills");
+  const src = "---\nname: route-skill\n---\n\n" + gen.GLOBAL_SKILL_HEADER + " -->\nbody\n";
+  w(root, "global-skills-claude/route-skill/SKILL.md", src);
+  w(path.dirname(home), "skills/route-skill/SKILL.md", "my notes: this is " + gen.GLOBAL_SKILL_MARKER + " says the README\n");
+  const r1 = gen.syncClaudeSkills(root, home);
+  eq(r1.refused.join(), "route-skill");
+  eq(fs.readFileSync(path.join(home, "route-skill/SKILL.md"), "utf8").startsWith("my notes"), true);
+  eq(gen.claudeSkillsState(root, home), "in-sync");                      // refused is not stale
+  fs.writeFileSync(path.join(home, "route-skill/SKILL.md"), src.replace("body", "old body"));
+  const r2 = gen.syncClaudeSkills(root, home);
+  eq(r2.written.join(), "route-skill");
+  eq(fs.readFileSync(path.join(home, "route-skill/SKILL.md"), "utf8"), src);
+  clean(root); clean(path.dirname(home));
 });
 
 process.exitCode = await (async () => {
