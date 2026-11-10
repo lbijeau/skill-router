@@ -1844,14 +1844,14 @@ test("install: route-skill for claude lands in the claude skills dir and never i
   clean(f.root); clean(f.claude);
 });
 
-test("claudeSkillsState: in-sync, stale when differing, stale when missing", () => {
+test("claudeSkillsStatus: not stale when current, stale when differing or missing", () => {
   const root = tmp(), home = path.join(tmp(), "skills");
   w(root, "global-skills-claude/route-skill/SKILL.md", "---\nname: route-skill\n---\n" + gen.GLOBAL_SKILL_HEADER + " -->\n");
-  eq(gen.claudeSkillsState(root, home), "stale");
+  eq(gen.claudeSkillsStatus(root, home).stale, true);
   gen.syncClaudeSkills(root, home);
-  eq(gen.claudeSkillsState(root, home), "in-sync");
+  eq(gen.claudeSkillsStatus(root, home).stale, false);
   fs.appendFileSync(path.join(home, "route-skill/SKILL.md"), "x");
-  eq(gen.claudeSkillsState(root, home), "stale");
+  eq(gen.claudeSkillsStatus(root, home).stale, true);
   clean(root); clean(path.dirname(home));
 });
 
@@ -2084,8 +2084,8 @@ test("status: a user's own route-skill is refused by install and is a warning, n
   gen.mergeClaudePermissions(sp, gen.claudeReadRules(root).rules);
   w(claude, "skills/route-skill/SKILL.md", "my own skill\n");
   eq(gen.syncClaudeSkills(root, path.join(claude, "skills")).refused.join(), "route-skill");
-  eq(gen.claudeSkillsState(root, path.join(claude, "skills")), "in-sync");
-  eq(gen.claudeSkillsRefused(root, path.join(claude, "skills")).join(), "route-skill");
+  eq(gen.claudeSkillsStatus(root, path.join(claude, "skills")).stale, false);
+  eq(gen.claudeSkillsStatus(root, path.join(claude, "skills")).refused.join(), "route-skill");
   const r = gen.statusOf(root, manifest, { claudeHome: claude });
   eq(r.claudeInstall, "in-sync"); eq(r.exitCode, 0);
   eq(r.warnings.some(x => /route-skill/.test(x) && /not generated/.test(x)), true);
@@ -2188,7 +2188,7 @@ test("syncClaudeSkills: a user file that only mentions the marker phrase is refu
   const r1 = gen.syncClaudeSkills(root, home);
   eq(r1.refused.join(), "route-skill");
   eq(fs.readFileSync(path.join(home, "route-skill/SKILL.md"), "utf8").startsWith("my notes"), true);
-  eq(gen.claudeSkillsState(root, home), "in-sync");                      // refused is not stale
+  eq(gen.claudeSkillsStatus(root, home).stale, false);                      // refused is not stale
   fs.writeFileSync(path.join(home, "route-skill/SKILL.md"), src.replace("body", "old body"));
   const r2 = gen.syncClaudeSkills(root, home);
   eq(r2.written.join(), "route-skill");
