@@ -74,10 +74,6 @@ export function atomicWrite(file, content, mode) {
   fs.renameSync(tmpf, file);
 }
 
-export function isSymlink(p) {
-  try { return fs.lstatSync(p).isSymbolicLink(); } catch { return false; }
-}
-
 export function realPath(p) {
   let cur = p;
   let tail = "";

@@ -220,36 +220,17 @@ this checkout from `permissions.allow` in `~/.claude/settings.json`, and delete
 
 ## Follow-ups
 
-Known work left over from the Claude Code target (PR #4), none of it blocking.
+Known work left over from the Claude Code target, none of it blocking.
 
-**Review leftovers (from PR A)**
-- No test covers the restart and `/reload-skills` reminders surviving a step that
-  fails after creating its directory; that needs a fault-injection seam. The
-  reminders can also fire for an empty directory when the write that followed
-  failed, or when no agent is valid.
-- `normalizeReadRule` resolves a rule whose glob is in the first path segment
-  (`Read(//**)`) against the current directory, and `hasClaudeReadRules` throws
-  on a `null` home. The injected home reaches the rule functions and
-  `resolveClaudeHome`, but not `statusOf` or `runClaudeInstall`.
-- `runCli` falls back to the real `~/.pi` and `~/.vibe` config if a test omits
-  `settingsPath` or `vibeConfigPath`. The "route-skill never lands in the pi
-  skills home" test could pre-create the directory and assert it stays empty.
-
-- `runInstall` and `runUpdate` take an options object now: a stale positional call
-  such as `runInstall(root, settingsPath, vibeConfigPath)` silently falls back to
-  the real pi and Vibe config, and `runInstall(root, null)` throws. A
-  `typeof paths !== "object"` guard in `flowPaths` would catch both.
-
-**Review leftovers (from PR C)**
-- `generate.mjs` re-exports the three modules with `export *`, so it now exposes
-  eight extra names (`NAME_RE`, `STATE`, `atomicWrite`, `isSymlink`,
-  `normalizeText`, `realPath`, `runClaudeInstall`, `pruneClaudeAgents`), and no
-  test pins the export list: a future same-named export in two modules would
-  vanish from the re-export silently. A one-line test, or explicit named
-  re-exports, would close that.
-- `isSymlink` lives in `common.mjs` but only `claude.mjs` uses it;
-  `pruneClaudeAgents` sits at the end of `claude.mjs`, far from `ownedOrphans`;
-  `prune` could write `const claudeAgents = pruneClaudeAgents(root, names)`.
+**Review leftovers (from PR D)**
+- `flowPaths` rejects `null` and non-objects but lets an array through
+  (`runInstall(root, [])` falls back to the real pi and Vibe config).
+- The export-list test checks that a name is present, not that it is the same
+  binding, so a local export that shadows a star-exported one would pass.
+- `claudeReadRules(root, null)` throws (its default covers only `undefined`),
+  unlike `hasClaudeReadRules` and `mergeClaudePermissions`.
+- The `runCli` guard test covers `install` only (`update` shares the branch), and
+  the TypeError test leaves six temp directories behind.
 
 **Naming**
 - `writeClaudeRouterAgent` is a thin wrapper kept for symmetry with
@@ -259,6 +240,9 @@ Known work left over from the Claude Code target (PR #4), none of it blocking.
 - `settings.json.bak` is overwritten by each merge, and the temporary file it is
   written through exists for a few milliseconds at the default mode before being
   set to 0600 and renamed; `--no-claude` is not sticky.
+- An injected home reaches the allow-rule functions and `resolveClaudeHome`, but
+  is not threaded through `statusOf`, `claudeInstallStatus` or `runClaudeInstall`:
+  no caller needs it, and every test that matters uses a root outside the home.
 - A clone symlink sweep (the live probe showed reads through a symlink in a
   clone prompt, so it is not needed today), an uninstall helper, and putting the
   checkout path in the ownership marker. Two checkouts installing into one
