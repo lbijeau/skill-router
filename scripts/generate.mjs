@@ -591,9 +591,10 @@ function expandTilde(p) {
   return p.startsWith("~/") ? path.join(os.homedir(), p.slice(2)) : p;
 }
 
-function atomicWrite(file, content) {
+function atomicWrite(file, content, mode) {
   const tmpf = `${file}.tmp-${process.pid}`;
   fs.writeFileSync(tmpf, content);
+  if (mode !== undefined) fs.chmodSync(tmpf, mode);
   fs.renameSync(tmpf, file);
 }
 
@@ -689,6 +690,128 @@ export function claudeAgentsInstallState(root, agentsDir) {
     if (m && !known.has(m[1]) && isOwnedClaudeAgent(path.join(agentsDir, f))) details.push(`${m[1]}: orphan`);
   }
   return { state: details.length ? "stale" : "in-sync", refused, details };
+}
+
+// Read allow rules for the Claude config: skills/** (clones) and catalog/**
+// (the router reads the catalog). Built from realpaths, because Claude Code
+// applies an allow rule only when the path and what it resolves to both match.
+export function claudeReadRules(repoRoot, home = os.homedir()) {
+  const real = realPath(path.resolve(repoRoot));
+  const homeReal = realPath(path.resolve(home));
+  if (/[*?\[\]{}()]/.test(real)) {
+    return { rules: [], error: `checkout path contains rule metacharacters: ${real}` };
+  }
+  const base = real === homeReal || real.startsWith(homeReal + path.sep)
+    ? "~/" + path.relative(homeReal, real)
+    : "/" + real;                                  // "//Users/..." absolute form
+  return { rules: [`Read(${base}/skills/**)`, `Read(${base}/catalog/**)`] };
+}
+
+// ~/ and // spellings of the same path compare equal.
+function normRule(rule) {
+  const m = String(rule).match(/^Read\((.*)\)$/);
+  if (!m) return String(rule);
+  let p = m[1];
+  if (p.startsWith("~/")) p = path.join(os.homedir(), p.slice(2));
+  else if (p.startsWith("//")) p = p.slice(1);
+  return `Read(${p})`;
+}
+
+function claudeAllowList(parsed) {
+  const allow = parsed?.permissions?.allow;
+  return Array.isArray(allow) ? allow : [];
+}
+
+// `hooks.onBeforeCommit` is a test seam, called after the backup and before
+// the final re-check of the file.
+export function mergeClaudePermissions(settingsPath, rules, hooks = {}) {
+  let target = settingsPath;
+  try { if (fs.lstatSync(settingsPath).isSymbolicLink()) target = fs.realpathSync(settingsPath); }
+  catch { /* absent: create at settingsPath */ }
+  const skip = (error) => ({ changed: false, added: [], error });
+  if (!fs.existsSync(target)) {
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    atomicWrite(target, JSON.stringify({ permissions: { allow: [...rules] } }, null, 2) + "\n");
+    return { changed: true, added: [...rules] };
+  }
+  const before = fs.statSync(target);
+  const raw = fs.readFileSync(target, "utf8");
+  let existing;
+  try { existing = JSON.parse(raw); }
+  catch { return skip("unparseable settings file, merge skipped"); }
+  if (existing === null || typeof existing !== "object" || Array.isArray(existing)) {
+    return skip("settings file top level is not an object, merge skipped");
+  }
+  if ("permissions" in existing
+      && (existing.permissions === null || typeof existing.permissions !== "object" || Array.isArray(existing.permissions))) {
+    return skip("permissions is not an object, merge skipped");
+  }
+  if (existing.permissions && "allow" in existing.permissions && !Array.isArray(existing.permissions.allow)) {
+    return skip("permissions.allow is not an array, merge skipped");
+  }
+  const list = claudeAllowList(existing);
+  const present = new Set(list.map(normRule));
+  const added = rules.filter(r => !present.has(normRule(r)));
+  if (added.length === 0) return { changed: false, added: [] };
+  const next = { ...existing, permissions: { ...existing.permissions, allow: [...list, ...added] } };
+  atomicWrite(target + ".bak", raw, 0o600);
+  hooks.onBeforeCommit?.();
+  const now = fs.statSync(target);
+  if (now.size !== before.size || now.mtimeMs !== before.mtimeMs) {
+    return skip("settings file changed during merge, skipped");
+  }
+  atomicWrite(target, JSON.stringify(next, null, 2) + "\n", before.mode & 0o777);
+  return { changed: true, added };
+}
+
+export function hasClaudeReadRules(settingsPath, rules) {
+  let parsed;
+  try { parsed = JSON.parse(fs.readFileSync(settingsPath, "utf8")); } catch { return false; }
+  const present = new Set(claudeAllowList(parsed).map(normRule));
+  return rules.every(r => present.has(normRule(r)));
+}
+
+export const GLOBAL_SKILL_MARKER = "overwritten by skill-router install/update";
+
+function claudeSkillSources(root) {
+  const srcDir = path.join(root, "global-skills-claude");
+  if (!fs.existsSync(srcDir)) return [];
+  const out = [];
+  for (const d of fs.readdirSync(srcDir, { withFileTypes: true })) {
+    const file = path.join(srcDir, d.name, "SKILL.md");
+    if (d.isDirectory() && fs.existsSync(file)) out.push({ name: d.name, content: fs.readFileSync(file, "utf8") });
+  }
+  return out;
+}
+
+// Never overwrites a user's own file: only absent files or files carrying the
+// generated-boilerplate marker are written; symlinks are refused.
+export function syncClaudeSkills(root, skillsHome) {
+  const written = [], refused = [];
+  const dirCreated = !fs.existsSync(skillsHome);
+  for (const src of claudeSkillSources(root)) {
+    const dir = path.join(skillsHome, src.name);
+    const dest = path.join(dir, "SKILL.md");
+    if (isSymlink(dir) || isSymlink(dest)) { refused.push(src.name); continue; }
+    if (fs.existsSync(dest)) {
+      const cur = fs.readFileSync(dest, "utf8");
+      if (!cur.includes(GLOBAL_SKILL_MARKER)) { refused.push(src.name); continue; }
+      if (cur === src.content) continue;
+    }
+    fs.mkdirSync(dir, { recursive: true });
+    atomicWrite(dest, src.content);
+    written.push(src.name);
+  }
+  return { written, refused, dirCreated };
+}
+
+export function claudeSkillsState(root, skillsHome) {
+  for (const src of claudeSkillSources(root)) {
+    const dest = path.join(skillsHome, src.name, "SKILL.md");
+    try { if (fs.readFileSync(dest, "utf8") !== src.content) return "stale"; }
+    catch { return "stale"; }
+  }
+  return "in-sync";
 }
 
 function realPath(p) {

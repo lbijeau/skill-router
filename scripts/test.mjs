@@ -1694,6 +1694,161 @@ test("claudeAgentsInstallState: in-sync, then stale for missing dir/file, differ
   clean(root); clean(path.dirname(dest));
 });
 
+// ---- Claude Code target: Task 3 ----
+const RULES = ["Read(~/sr/skills/**)", "Read(~/sr/catalog/**)"];
+const readJson = f => JSON.parse(fs.readFileSync(f, "utf8"));
+
+test("claudeReadRules: under home is ~-relative for skills and catalog", () => {
+  const home = tmp(); const root = path.join(home, "repositories/sr");
+  fs.mkdirSync(root, { recursive: true });
+  const r = gen.claudeReadRules(root, home);
+  eq(r.error, undefined);
+  eq(r.rules.join("|"), "Read(~/repositories/sr/skills/**)|Read(~/repositories/sr/catalog/**)");
+  clean(home);
+});
+
+test("claudeReadRules: outside home is //-absolute; metacharacter path errors; symlinked checkout resolves to real path", () => {
+  const home = tmp(), base = tmp(); const root = path.join(base, "sr");
+  fs.mkdirSync(root, { recursive: true });
+  const real = fs.realpathSync(root);
+  eq(gen.claudeReadRules(root, home).rules[0], `Read(/${real}/skills/**)`);
+  eq(gen.claudeReadRules(root, home).rules[0].startsWith("Read(//"), true);
+  const weird = path.join(base, "we(ird"); fs.mkdirSync(weird);
+  const bad = gen.claudeReadRules(weird, home);
+  eq(bad.rules.length, 0);
+  eq(/metachar/i.test(bad.error), true);
+  fs.symlinkSync(root, path.join(base, "link"));
+  eq(gen.claudeReadRules(path.join(base, "link"), home).rules[0], `Read(/${real}/skills/**)`);
+  clean(home); clean(base);
+});
+
+test("mergeClaudePermissions: creates missing file with exactly permissions.allow", () => {
+  const dir = tmp(); const sp = path.join(dir, "settings.json");
+  const r = gen.mergeClaudePermissions(sp, RULES);
+  eq(r.changed, true);
+  eq(JSON.stringify(readJson(sp)), JSON.stringify({ permissions: { allow: RULES } }));
+  clean(dir);
+});
+
+test("mergeClaudePermissions: appends, keeps other keys, .bak 0600, preserves mode, idempotent", () => {
+  const dir = tmp(); const sp = path.join(dir, "settings.json");
+  const orig = JSON.stringify({ env: { A: "1" }, permissions: { allow: ["Bash(ls)"], deny: ["X"] } }, null, 2) + "\n";
+  fs.writeFileSync(sp, orig); fs.chmodSync(sp, 0o640);
+  const r = gen.mergeClaudePermissions(sp, RULES);
+  eq(r.changed, true);
+  eq(r.added.join("|"), RULES.join("|"));
+  const j = readJson(sp);
+  eq(j.env.A, "1"); eq(j.permissions.deny[0], "X");
+  eq(j.permissions.allow.join("|"), ["Bash(ls)", ...RULES].join("|"));
+  eq(fs.readFileSync(sp + ".bak", "utf8"), orig);
+  eq(fs.statSync(sp + ".bak").mode & 0o777, 0o600);
+  eq(fs.statSync(sp).mode & 0o777, 0o640);
+  eq(gen.mergeClaudePermissions(sp, RULES).changed, false);
+  clean(dir);
+});
+
+test("mergeClaudePermissions: equivalent ~ and // spellings count as present", () => {
+  const dir = tmp(); const sp = path.join(dir, "settings.json");
+  const abs = "Read(/" + path.join(os.homedir(), "sr/skills/**") + ")";    // //Users/... form
+  fs.writeFileSync(sp, JSON.stringify({ permissions: { allow: [abs] } }));
+  const r = gen.mergeClaudePermissions(sp, ["Read(~/sr/skills/**)"]);
+  eq(r.changed, false);
+  clean(dir);
+});
+
+test("mergeClaudePermissions: unparseable, bad top level, bad permissions, bad allow are untouched with an error", () => {
+  const cases = ["{ not json", "null", "[1]", '"str"', '{"permissions":"x"}', '{"permissions":{"allow":{"a":1}}}'];
+  for (const body of cases) {
+    const dir = tmp(); const sp = path.join(dir, "settings.json");
+    fs.writeFileSync(sp, body);
+    const r = gen.mergeClaudePermissions(sp, RULES);
+    eq(r.changed, false);
+    eq(typeof r.error, "string");
+    eq(fs.readFileSync(sp, "utf8"), body);
+    eq(fs.existsSync(sp + ".bak"), false);
+    clean(dir);
+  }
+});
+
+test("mergeClaudePermissions: symlinked settings.json is edited at its target and stays a symlink", () => {
+  const dir = tmp(); const real = path.join(dir, "dot/settings.json"); const link = path.join(dir, "settings.json");
+  w(dir, "dot/settings.json", "{}\n");
+  fs.symlinkSync(real, link);
+  gen.mergeClaudePermissions(link, RULES);
+  eq(fs.lstatSync(link).isSymbolicLink(), true);
+  eq(readJson(real).permissions.allow.length, 2);
+  clean(dir);
+});
+
+test("mergeClaudePermissions: aborts without writing when the file changes mid-merge", () => {
+  const dir = tmp(); const sp = path.join(dir, "settings.json");
+  fs.writeFileSync(sp, "{}\n");
+  const r = gen.mergeClaudePermissions(sp, RULES, { onBeforeCommit: () => fs.writeFileSync(sp, '{"other":true}\n') });
+  eq(r.changed, false);
+  eq(/changed/.test(r.error), true);
+  eq(fs.readFileSync(sp, "utf8"), '{"other":true}\n');
+  clean(dir);
+});
+
+test("hasClaudeReadRules: true when all present, false when partial, missing or unparseable", () => {
+  const dir = tmp(); const sp = path.join(dir, "settings.json");
+  eq(gen.hasClaudeReadRules(sp, RULES), false);
+  fs.writeFileSync(sp, "{ nope");
+  eq(gen.hasClaudeReadRules(sp, RULES), false);
+  fs.writeFileSync(sp, JSON.stringify({ permissions: { allow: [RULES[0]] } }));
+  eq(gen.hasClaudeReadRules(sp, RULES), false);
+  fs.writeFileSync(sp, JSON.stringify({ permissions: { allow: RULES } }));
+  eq(gen.hasClaudeReadRules(sp, RULES), true);
+  clean(dir);
+});
+
+test("global-skills-claude/route-skill: frontmatter, marker comment and literal subagent_type", () => {
+  const body = fs.readFileSync(path.join(gen.REPO_ROOT, "global-skills-claude/route-skill/SKILL.md"), "utf8");
+  eq(body.startsWith("---\nname: route-skill\n"), true);
+  eq(body.includes(gen.GLOBAL_SKILL_MARKER), true);
+  eq(body.includes("subagent_type: skill-router"), true);
+});
+
+test("syncClaudeSkills: writes route-skill; refuses unmarked file and symlinked destination; reports dirCreated", () => {
+  const root = tmp(), home = path.join(tmp(), "skills");
+  const src = fs.readFileSync(path.join(gen.REPO_ROOT, "global-skills-claude/route-skill/SKILL.md"), "utf8");
+  w(root, "global-skills-claude/route-skill/SKILL.md", src);
+  const r1 = gen.syncClaudeSkills(root, home);
+  eq(r1.written.join(), "route-skill"); eq(r1.dirCreated, true);
+  eq(fs.readFileSync(path.join(home, "route-skill/SKILL.md"), "utf8"), src);
+  eq(gen.syncClaudeSkills(root, home).dirCreated, false);
+  fs.writeFileSync(path.join(home, "route-skill/SKILL.md"), "my own skill\n");
+  const r2 = gen.syncClaudeSkills(root, home);
+  eq(r2.refused.join(), "route-skill"); eq(r2.written.length, 0);
+  eq(fs.readFileSync(path.join(home, "route-skill/SKILL.md"), "utf8"), "my own skill\n");
+  fs.rmSync(path.join(home, "route-skill/SKILL.md"));
+  w(path.dirname(home), "elsewhere/SKILL.md", src);
+  fs.symlinkSync(path.join(path.dirname(home), "elsewhere/SKILL.md"), path.join(home, "route-skill/SKILL.md"));
+  const r3 = gen.syncClaudeSkills(root, home);
+  eq(r3.refused.join(), "route-skill");
+  eq(fs.lstatSync(path.join(home, "route-skill/SKILL.md")).isSymbolicLink(), true);
+  clean(root); clean(path.dirname(home));
+});
+
+test("syncClaudeSkills: nothing is written under a pi skills home", () => {
+  const root = tmp(), home = path.join(tmp(), "claude-skills"), pi = tmp();
+  w(root, "global-skills-claude/route-skill/SKILL.md", "---\nname: route-skill\n---\n<!-- " + gen.GLOBAL_SKILL_MARKER + " -->\n");
+  gen.syncClaudeSkills(root, home);
+  eq(fs.readdirSync(pi).length, 0);
+  clean(root); clean(path.dirname(home)); clean(pi);
+});
+
+test("claudeSkillsState: in-sync, stale when differing, stale when missing", () => {
+  const root = tmp(), home = path.join(tmp(), "skills");
+  w(root, "global-skills-claude/route-skill/SKILL.md", "---\nname: route-skill\n---\n<!-- " + gen.GLOBAL_SKILL_MARKER + " -->\n");
+  eq(gen.claudeSkillsState(root, home), "stale");
+  gen.syncClaudeSkills(root, home);
+  eq(gen.claudeSkillsState(root, home), "in-sync");
+  fs.appendFileSync(path.join(home, "route-skill/SKILL.md"), "x");
+  eq(gen.claudeSkillsState(root, home), "stale");
+  clean(root); clean(path.dirname(home));
+});
+
 process.exitCode = await (async () => {
   let failed = 0;
   for (const t of tests) {
