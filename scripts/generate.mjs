@@ -92,7 +92,7 @@ function normalizeDescription(val) {
   if (val == null) return null;
   const s = String(val)
     .replace(/\t/g, " ")
-    .replace(/[\u0000-\u0008\u000B-\u001F\u007F]/g, " ")
+    .replace(/[\u0000-\u0008\u000B-\u001F\u007F-\u009F]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
   if (s === "") return null;

@@ -2270,6 +2270,22 @@ test("hasClaudeReadRules: different directories are never equal, and an injected
   clean(base); clean(H);
 });
 
+test("parseSkillFrontmatter: C1 control characters (NEL) in a description become spaces", () => {
+  const d = gen.parseSkillFrontmatter("---\nname: x\ndescription: a\u0085b\u0080c\u009fd\n---\n").description;
+  eq(d, "a b c d");
+  eq(/[\u0080-\u009f]/.test(d), false);
+});
+
+test("renderClaudeAgentFile: a NEL in a third-party skill description cannot reach the body rows", () => {
+  const root = tmp();
+  w(root, "skills/one/a/SKILL.md", "---\nname: a\ndescription: first\u0085second\n---\nbody\n");
+  const found = gen.discoverSkills(path.join(root, "skills/one"), E());
+  const out = gen.renderClaudeAgentFile(CE(), found.skills, { home: "/x" });
+  eq(/[\u0085]/.test(out), false);
+  eq(out.includes("- a: first second —"), true);
+  clean(root);
+});
+
 process.exitCode = await (async () => {
   let failed = 0;
   for (const t of tests) {
