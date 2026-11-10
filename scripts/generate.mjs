@@ -699,7 +699,8 @@ export function claudeAgentsInstallState(root, agentsDir) {
     if (fs.readFileSync(dest, "utf8") !== src.content) details.push(`${src.stem}: installed copy differs`);
   }
   const known = new Set(sources.map(x => x.stem));
-  for (const f of fs.readdirSync(agentsDir)) {
+  // The installer prunes only when at least one source is valid; mirror that.
+  for (const f of valid.length ? fs.readdirSync(agentsDir) : []) {
     const m = f.match(/^(.*)\.md$/);
     if (m && !known.has(m[1]) && isOwnedClaudeAgent(path.join(agentsDir, f))) details.push(`${m[1]}: orphan`);
   }
@@ -1227,6 +1228,7 @@ export function statusOf(root, manifest, opts = {}) {
       warnings.push(`claude: ${rr.error}`);
     } else if (!fs.existsSync(settingsFile)) {
       stale = true;
+      warnings.push(`claude: ${settingsFile} missing, allow rules not installed`);
     } else {
       let parseable = true;
       try { JSON.parse(fs.readFileSync(settingsFile, "utf8")); } catch { parseable = false; }

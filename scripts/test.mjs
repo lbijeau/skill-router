@@ -2210,6 +2210,29 @@ test("syncClaudeSkills: only refused skills means dirCreated false for an existi
   clean(root); clean(base);
 });
 
+test("status: a missing claude settings.json is stale with a warning naming the file", () => {
+  const { root, manifest } = statusFixture();
+  fs.mkdirSync(path.join(root, "global-skills-claude/route-skill"), { recursive: true });
+  fs.copyFileSync(path.join(gen.REPO_ROOT, "global-skills-claude/route-skill/SKILL.md"), path.join(root, "global-skills-claude/route-skill/SKILL.md"));
+  const claude = tmp();
+  gen.installClaudeAgents(root, path.join(claude, "agents"));
+  gen.syncClaudeSkills(root, path.join(claude, "skills"));
+  const r = gen.statusOf(root, manifest, { claudeHome: claude });
+  eq(r.claudeInstall, "stale");
+  eq(r.warnings.some(x => x.includes(path.join(claude, "settings.json")) && /missing/.test(x)), true);
+  clean(root); clean(claude);
+});
+
+test("claudeAgentsInstallState: owned orphans are not stale when no source is valid (the installer skips its prune then)", () => {
+  const root = tmp(), dest = path.join(tmp(), "agents");
+  claudeSrc(root, ["a"]);
+  gen.installClaudeAgents(root, dest);
+  fs.rmSync(path.join(root, "agents-claude"), { recursive: true });
+  eq(gen.claudeAgentsInstallState(root, dest).state, "in-sync");
+  eq(gen.installClaudeAgents(root, dest).pruned.length, 0);               // install agrees
+  clean(root); clean(path.dirname(dest));
+});
+
 process.exitCode = await (async () => {
   let failed = 0;
   for (const t of tests) {
