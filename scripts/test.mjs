@@ -1837,7 +1837,7 @@ test("syncClaudeSkills: writes route-skill; refuses unmarked file and symlinked 
 
 test("syncClaudeSkills: nothing is written under a pi skills home", () => {
   const root = tmp(), home = path.join(tmp(), "claude-skills"), pi = tmp();
-  w(root, "global-skills-claude/route-skill/SKILL.md", "---\nname: route-skill\n---\n<!-- " + gen.GLOBAL_SKILL_MARKER + " -->\n");
+  w(root, "global-skills-claude/route-skill/SKILL.md", "---\nname: route-skill\n---\n" + gen.GLOBAL_SKILL_HEADER + " -->\n");
   gen.syncClaudeSkills(root, home);
   eq(fs.readdirSync(pi).length, 0);
   clean(root); clean(path.dirname(home)); clean(pi);
@@ -1845,7 +1845,7 @@ test("syncClaudeSkills: nothing is written under a pi skills home", () => {
 
 test("claudeSkillsState: in-sync, stale when differing, stale when missing", () => {
   const root = tmp(), home = path.join(tmp(), "skills");
-  w(root, "global-skills-claude/route-skill/SKILL.md", "---\nname: route-skill\n---\n<!-- " + gen.GLOBAL_SKILL_MARKER + " -->\n");
+  w(root, "global-skills-claude/route-skill/SKILL.md", "---\nname: route-skill\n---\n" + gen.GLOBAL_SKILL_HEADER + " -->\n");
   eq(gen.claudeSkillsState(root, home), "stale");
   gen.syncClaudeSkills(root, home);
   eq(gen.claudeSkillsState(root, home), "in-sync");
@@ -2105,6 +2105,91 @@ test("printStatus: a stale claude router is shown, not only in the exit code", (
   eq(st.exitCode, 1);
   eq(st.output.includes("claude router: stale"), true);
   clean(root);
+});
+
+// ---- PR review fixes ----
+test("validateClaudeAgentSource: any extra or malformed frontmatter key is rejected", () => {
+  const good = gen.renderClaudeAgentFile(CE(), CS, { home: "/x" });
+  eq(gen.validateClaudeAgentSource(good, "a"), null);
+  for (const extra of ["permissionMode: bypassPermissions", "hooks:", "mcpServers:", "skills: x",
+    " tools: Bash", '"tools": "*"', "model: opus"]) {
+    const bad = good.replace("omitClaudeMd: true", "omitClaudeMd: true\n" + extra);
+    eq(typeof gen.validateClaudeAgentSource(bad, "a"), "string", extra);
+  }
+  eq(typeof gen.validateClaudeAgentSource(good.replace("omitClaudeMd: true\n", ""), "a"), "string");
+  eq(typeof gen.validateClaudeAgentSource(good.replace("omitClaudeMd: true", "omitClaudeMd: false"), "a"), "string");
+});
+
+test("installClaudeAgents: a source with an extra permission key is invalid and never installed", () => {
+  const root = tmp(), dest = path.join(tmp(), "agents");
+  claudeSrc(root, ["a"]);
+  const f = path.join(root, "agents-claude/a.md");
+  fs.writeFileSync(f, fs.readFileSync(f, "utf8").replace("omitClaudeMd: true", "omitClaudeMd: true\npermissionMode: bypassPermissions"));
+  const r = gen.installClaudeAgents(root, dest);
+  eq(r.installed.length, 0);
+  eq(r.invalid.map(x => x.name).join(), "a");
+  eq(fs.existsSync(path.join(dest, "a.md")), false);
+  clean(root); clean(path.dirname(dest));
+});
+
+test("status: a bad CLAUDE_CONFIG_DIR is an error state with exit 1, shown in the output", () => {
+  const { root, manifest } = statusFixture();
+  const err = "CLAUDE_CONFIG_DIR must be an absolute path: ~/cfg";
+  const r = gen.statusOf(root, manifest, { claudeError: err });
+  eq(r.claudeInstall, "error");
+  eq(r.exitCode, 1);
+  eq(r.warnings.some(x => x.includes(err)), true);
+  const st = gen.printStatus(root, manifest, { claudeError: err });
+  eq(st.exitCode, 1);
+  eq(st.output.includes("claude install: error"), true);
+  eq(st.output.includes(err), true);
+  clean(root);
+});
+
+test("writeClaudeAgentFiles: an entry that gains a skip reason has its owned file removed; unowned file and the router stay", () => {
+  const root = tmp();
+  skill(root, "skills/foo/a"); skill(root, "skills/skill-router/a");
+  const m1 = { repos: [CE({ name: "foo" })] };
+  gen.writeClaudeAgentFiles(root, m1);
+  gen.writeClaudeRouterAgent(root);
+  eq(gen.isOwnedClaudeAgent(path.join(root, "agents-claude/foo.md")), true);
+  const m2 = { repos: [CE({ name: "foo", description: "   " }), CE({ name: "skill-router" })] };
+  const r = gen.writeClaudeAgentFiles(root, m2);
+  eq(r.removed.join(), "foo");
+  eq(r.warnings.length, 2);
+  eq(fs.existsSync(path.join(root, "agents-claude/foo.md")), false);
+  eq(gen.isOwnedClaudeAgent(path.join(root, "agents-claude/skill-router.md")), true);   // router never deleted
+  w(root, "agents-claude/foo.md", "hand written\n");
+  gen.writeClaudeAgentFiles(root, m2);
+  eq(fs.readFileSync(path.join(root, "agents-claude/foo.md"), "utf8"), "hand written\n");
+  clean(root);
+});
+
+test("status: an owned leftover for an entry with a skip reason is stale; no file is —", () => {
+  const root = tmp();
+  skill(root, "skills/foo/a"); gitRepo(path.join(root, "skills/foo"));
+  const manifest = { repos: [CE({ name: "foo", description: "  " })] };
+  w(root, "agents-claude/foo.md", gen.renderClaudeAgentFile(CE({ name: "foo" }), CS, { home: "/x" }));
+  eq(gen.statusOf(root, manifest).rows[0].claude, "stale");
+  fs.rmSync(path.join(root, "agents-claude/foo.md"));
+  eq(gen.statusOf(root, manifest).rows[0].claude, "—");
+  clean(root);
+});
+
+test("syncClaudeSkills: a user file that only mentions the marker phrase is refused; the real header at the top is owned", () => {
+  const root = tmp(), home = path.join(tmp(), "skills");
+  const src = "---\nname: route-skill\n---\n\n" + gen.GLOBAL_SKILL_HEADER + " -->\nbody\n";
+  w(root, "global-skills-claude/route-skill/SKILL.md", src);
+  w(path.dirname(home), "skills/route-skill/SKILL.md", "my notes: this is " + gen.GLOBAL_SKILL_MARKER + " says the README\n");
+  const r1 = gen.syncClaudeSkills(root, home);
+  eq(r1.refused.join(), "route-skill");
+  eq(fs.readFileSync(path.join(home, "route-skill/SKILL.md"), "utf8").startsWith("my notes"), true);
+  eq(gen.claudeSkillsState(root, home), "in-sync");                      // refused is not stale
+  fs.writeFileSync(path.join(home, "route-skill/SKILL.md"), src.replace("body", "old body"));
+  const r2 = gen.syncClaudeSkills(root, home);
+  eq(r2.written.join(), "route-skill");
+  eq(fs.readFileSync(path.join(home, "route-skill/SKILL.md"), "utf8"), src);
+  clean(root); clean(path.dirname(home));
 });
 
 process.exitCode = await (async () => {

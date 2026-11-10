@@ -344,6 +344,11 @@ export function writeClaudeAgentFiles(root, manifest, skip = new Set()) {
     const reason = claudeSkipReason(entry);
     if (reason) {
       warnings.push(`${entry.name}: ${reason}, no claude agent written`);
+      const stale = path.join(agentsDir, `${entry.name}.md`);
+      if (entry.name !== ROUTER_AGENT_NAME && isOwnedClaudeAgent(stale)) {
+        fs.rmSync(stale);
+        removed.push(entry.name);
+      }
       continue;
     }
     const found = discoverSkills(path.join(root, "skills", entry.name), entry);
@@ -612,9 +617,14 @@ export function validateClaudeAgentSource(content, stem) {
   const end = lines.indexOf("---", 1);
   if (end < 0) return "unclosed frontmatter";
   const fm = lines.slice(1, end);
-  if (!fm.includes(`name: ${stem}`)) return "name does not match file name";
-  const toolLines = fm.filter(l => /^tools\s*:/.test(l));
-  if (toolLines.length !== 1 || toolLines[0] !== CLAUDE_TOOLS_LINE) return "tools line missing, duplicated or different";
+  // Exactly the four keys the generator writes, once each, in order: any other
+  // key (permissionMode, hooks, mcpServers, skills, model...) could widen what
+  // the agent may do.
+  const keyOf = l => (l.match(/^([A-Za-z]+): /) || [])[1];
+  if (fm.map(keyOf).join() !== "name,description,tools,omitClaudeMd") return "unexpected frontmatter keys";
+  if (fm[0] !== `name: ${stem}`) return "name does not match file name";
+  if (fm[2] !== CLAUDE_TOOLS_LINE) return "tools line missing or different";
+  if (fm[3] !== "omitClaudeMd: true") return "omitClaudeMd: true missing";
   while (lines.length && lines[lines.length - 1] === "") lines.pop();
   if (lines[lines.length - 1] !== CLAUDE_MARKER) return "missing ownership marker";
   return null;
@@ -780,6 +790,18 @@ export function hasClaudeReadRules(settingsPath, rules) {
 }
 
 export const GLOBAL_SKILL_MARKER = "overwritten by skill-router install/update";
+export const GLOBAL_SKILL_HEADER = "<!-- Generated-style boilerplate; " + GLOBAL_SKILL_MARKER;
+
+// Owned only if the boilerplate comment is the first thing after the
+// frontmatter; a user's file that merely mentions the phrase is not.
+function isOwnedSkillContent(content) {
+  const lines = content.split("\n");
+  if (lines[0] !== "---") return false;
+  const end = lines.indexOf("---", 1);
+  if (end < 0) return false;
+  const first = lines.slice(end + 1).find(l => l.trim() !== "");
+  return first !== undefined && first.startsWith(GLOBAL_SKILL_HEADER);
+}
 
 function claudeSkillSources(root) {
   const srcDir = path.join(root, "global-skills-claude");
@@ -803,7 +825,7 @@ function skillDestStatus(skillsHome, src) {
   if (!fs.existsSync(dest)) return "absent";
   let cur;
   try { cur = fs.readFileSync(dest, "utf8"); } catch { return "refused"; }
-  if (!cur.includes(GLOBAL_SKILL_MARKER)) return "refused";
+  if (!isOwnedSkillContent(cur)) return "refused";
   return cur === src.content ? "current" : "outdated";
 }
 
@@ -1142,8 +1164,11 @@ export function statusOf(root, manifest, opts = {}) {
     }
     const claudeFile = path.join(root, "agents-claude", `${entry.name}.md`);
     let claude;
-    if (found.skills.length === 0 || claudeSkipReason(entry)) {
-      claude = fs.existsSync(claudeFile) && !claudeSkipReason(entry) ? "stale" : "—";
+    if (claudeSkipReason(entry)) {
+      // The writer removes an owned leftover; one that is still there is stale.
+      claude = entry.name !== ROUTER_AGENT_NAME && isOwnedClaudeAgent(claudeFile) ? "stale" : "—";
+    } else if (found.skills.length === 0) {
+      claude = fs.existsSync(claudeFile) ? "stale" : "—";
     } else if (!fs.existsSync(claudeFile)) {
       claude = "missing";
     } else {
@@ -1185,6 +1210,10 @@ export function statusOf(root, manifest, opts = {}) {
     : fs.readFileSync(claudeRouterFile, "utf8") === renderClaudeRouterAgent({ root }) ? "in-sync" : "stale";
   let claudeInstall = "n/a";
   const claudeHome = opts.claudeHome;
+  if (opts.claudeError) {
+    warnings.push(`claude: ${opts.claudeError}`);
+    claudeInstall = "error";
+  }
   if (claudeHome && fs.existsSync(claudeHome)) try {
     const agentsState = claudeAgentsInstallState(root, path.join(claudeHome, "agents"));
     let stale = agentsState.state === "stale";
@@ -1217,7 +1246,8 @@ export function statusOf(root, manifest, opts = {}) {
   const ok = rows.every(r => r.clone === "ok" && r.agent === "in-sync"
     && (r.vibe === "in-sync" || r.vibe === "—")
     && (r.claude === "in-sync" || r.claude === "—")) && catalog === "in-sync"
-    && router === "in-sync" && claudeRouter === "in-sync" && claudeInstall !== "stale";
+    && router === "in-sync" && claudeRouter === "in-sync"
+    && (claudeInstall === "n/a" || claudeInstall === "in-sync");
   return { rows, dropped, warnings, catalog, router, claudeRouter, claudeInstall, exitCode: ok ? 0 : 1 };
 }
 
@@ -1460,15 +1490,16 @@ export function runUpdate(root, settingsPath, vibeConfigPath, skillsHome, claude
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
   const cmd = process.argv[2];
   let claudeHome = null;
+  let claudeError = null;
   const noClaude = process.argv.includes("--no-claude");
   if (!noClaude) {
     const c = resolveClaudeHome(process.env, os.homedir());
-    if (c.error) console.error(`claude: skipped (${c.error})`);
+    if (c.error) claudeError = c.error;
     else claudeHome = c.dir;
   }
   try {
     if (cmd === "status") {
-      const st = printStatus(REPO_ROOT, loadManifest(REPO_ROOT), { claudeHome });
+      const st = printStatus(REPO_ROOT, loadManifest(REPO_ROOT), { claudeHome, claudeError });
       console.log(st.output.trimEnd());
       process.exit(st.exitCode);
     }
@@ -1478,6 +1509,10 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
         : runUpdate(REPO_ROOT, undefined, undefined, undefined, claudeHome);
       if (noClaude) console.log("claude: skipped (--no-claude)");
       for (const line of r.report) console.log(line);
+      if (claudeError) {
+        console.log(`claude: skipped (${claudeError})`);
+        process.exit(1);
+      }
       process.exit(r.exitCode);
     }
   } catch (e) { console.error(e.message); process.exit(1); }
