@@ -574,15 +574,9 @@ export function prune(root, manifest) {
     }
   }
   const claudeDir = path.join(root, "agents-claude");
-  if (fs.existsSync(claudeDir)) {
-    for (const f of fs.readdirSync(claudeDir)) {
-      const m = f.match(/^(.*)\.md$/);
-      if (m && !names.has(m[1]) && m[1] !== ROUTER_AGENT_NAME
-          && isOwnedClaudeAgent(path.join(claudeDir, f))) {
-        fs.rmSync(path.join(claudeDir, f));
-        claudeAgents.push(m[1]);
-      }
-    }
+  for (const stem of ownedOrphans(claudeDir, new Set([...names, ROUTER_AGENT_NAME]))) {
+    fs.rmSync(path.join(claudeDir, `${stem}.md`));
+    claudeAgents.push(stem);
   }
   const skillsDir = path.join(root, "skills");
   if (fs.existsSync(skillsDir)) {
@@ -630,6 +624,17 @@ export function validateClaudeAgentSource(content, stem) {
   return null;
 }
 
+// Stems of owned generated agents in `dir` whose stem is not in `known`.
+function ownedOrphans(dir, known) {
+  if (!fs.existsSync(dir)) return [];
+  const out = [];
+  for (const f of fs.readdirSync(dir)) {
+    const m = f.match(/^(.*)\.md$/);
+    if (m && !known.has(m[1]) && isOwnedClaudeAgent(path.join(dir, f))) out.push(m[1]);
+  }
+  return out;
+}
+
 function readClaudeSources(root) {
   const dir = path.join(root, "agents-claude");
   let names;
@@ -668,12 +673,9 @@ export function installClaudeAgents(root, agentsDir) {
   const known = new Set(sources.map(x => x.stem));
   const pruneSkipped = !sources.some(x => !x.error);
   if (!pruneSkipped) {
-    for (const f of fs.readdirSync(agentsDir)) {
-      const m = f.match(/^(.*)\.md$/);
-      if (m && !known.has(m[1]) && isOwnedClaudeAgent(path.join(agentsDir, f))) {
-        fs.rmSync(path.join(agentsDir, f));
-        pruned.push(m[1]);
-      }
+    for (const stem of ownedOrphans(agentsDir, known)) {
+      fs.rmSync(path.join(agentsDir, `${stem}.md`));
+      pruned.push(stem);
     }
   }
   return { installed, pruned, refused, invalid, pruneSkipped, dirCreated };
@@ -698,11 +700,9 @@ export function claudeAgentsInstallState(root, agentsDir) {
     if (!isOwnedClaudeAgent(dest)) { refused.push(src.stem); continue; }
     if (fs.readFileSync(dest, "utf8") !== src.content) details.push(`${src.stem}: installed copy differs`);
   }
-  const known = new Set(sources.map(x => x.stem));
   // The installer prunes only when at least one source is valid; mirror that.
-  for (const f of valid.length ? fs.readdirSync(agentsDir) : []) {
-    const m = f.match(/^(.*)\.md$/);
-    if (m && !known.has(m[1]) && isOwnedClaudeAgent(path.join(agentsDir, f))) details.push(`${m[1]}: orphan`);
+  if (valid.length) {
+    for (const stem of ownedOrphans(agentsDir, new Set(sources.map(x => x.stem)))) details.push(`${stem}: orphan`);
   }
   return { state: details.length ? "stale" : "in-sync", refused, details };
 }
