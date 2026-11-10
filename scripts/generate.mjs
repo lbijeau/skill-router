@@ -1135,6 +1135,24 @@ export function cloneState(cloneDir) {
   return st.stdout.trim() === "" ? "ok" : "dirty";
 }
 
+const STATE = { IN_SYNC: "in-sync", STALE: "stale", MISSING: "missing", NONE: "—", NA: "n/a", ERROR: "error" };
+
+// A generated file against what it should contain; `expected` is a thunk so the
+// (sometimes expensive) render only runs when the file exists.
+function fileState(file, expected) {
+  if (!fs.existsSync(file)) return STATE.MISSING;
+  return fs.readFileSync(file, "utf8") === expected() ? STATE.IN_SYNC : STATE.STALE;
+}
+
+// A per-repo output: a repo with no skills should have no file, and `absentLabel`
+// is what that reads as (in-sync for pi, "—" for the optional targets).
+function repoOutputState(file, skillCount, absentLabel, render) {
+  if (skillCount === 0) return fs.existsSync(file) ? STATE.STALE : absentLabel;
+  return fileState(file, render);
+}
+
+const isSettled = state => state === STATE.IN_SYNC || state === STATE.NONE;
+
 export function statusOf(root, manifest, opts = {}) {
   const rows = [];
   const dropped = [];
@@ -1147,40 +1165,16 @@ export function statusOf(root, manifest, opts = {}) {
     const found = discoverSkills(cloneDir, entry);
     dropped.push(...found.dropped.map(d =>
       `${d.name}: kept ${d.keptDir}, dropped ${d.droppedDir}`));
-    const agentFile = path.join(root, "agents", `${entry.name}.md`);
-    let agent;
-    if (found.skills.length === 0) {
-      agent = fs.existsSync(agentFile) ? "stale" : "in-sync";
-    } else if (!fs.existsSync(agentFile)) {
-      agent = "missing";
-    } else {
-      const onDisk = fs.readFileSync(agentFile, "utf8");
-      const expected = renderAgentFile(entry, found.skills.map(s => s.name));
-      agent = onDisk === expected ? "in-sync" : "stale";
-    }
-    const tomlFile = path.join(root, "agents-vibe", `${entry.name}.toml`);
-    let vibe;
-    if (found.skills.length === 0) {
-      vibe = fs.existsSync(tomlFile) ? "stale" : "—";
-    } else if (!fs.existsSync(tomlFile)) {
-      vibe = "missing";
-    } else {
-      const onDisk = fs.readFileSync(tomlFile, "utf8");
-      const expected = renderVibeAgentTOML(entry, found.skills);
-      vibe = onDisk === expected ? "in-sync" : "stale";
-    }
+    const n = found.skills.length;
+    const agent = repoOutputState(path.join(root, "agents", `${entry.name}.md`), n, STATE.IN_SYNC,
+      () => renderAgentFile(entry, found.skills.map(s => s.name)));
+    const vibe = repoOutputState(path.join(root, "agents-vibe", `${entry.name}.toml`), n, STATE.NONE,
+      () => renderVibeAgentTOML(entry, found.skills));
     const claudeFile = path.join(root, "agents-claude", `${entry.name}.md`);
-    let claude;
-    if (claudeSkipReason(entry)) {
+    const claude = claudeSkipReason(entry)
       // The writer removes an owned leftover; one that is still there is stale.
-      claude = entry.name !== ROUTER_AGENT_NAME && isOwnedClaudeAgent(claudeFile) ? "stale" : "—";
-    } else if (found.skills.length === 0) {
-      claude = fs.existsSync(claudeFile) ? "stale" : "—";
-    } else if (!fs.existsSync(claudeFile)) {
-      claude = "missing";
-    } else {
-      claude = fs.readFileSync(claudeFile, "utf8") === renderClaudeAgentFile(entry, found.skills) ? "in-sync" : "stale";
-    }
+      ? (entry.name !== ROUTER_AGENT_NAME && isOwnedClaudeAgent(claudeFile) ? STATE.STALE : STATE.NONE)
+      : repoOutputState(claudeFile, n, STATE.NONE, () => renderClaudeAgentFile(entry, found.skills));
     rows.push({ name: entry.name, clone, skills: found.skills.length, agent, vibe, claude });
   }
   if (fs.existsSync(userAgentsDir)) {
@@ -1196,30 +1190,17 @@ export function statusOf(root, manifest, opts = {}) {
   // failed install would read as stale forever.
   const catalogSkip = new Set(rows.filter(r => r.clone === "missing" || r.clone === "not-a-repo")
     .map(r => r.name));
-  const catalogFile = path.join(root, "catalog", "skill-catalog.md");
-  let catalog;
-  if (!fs.existsSync(catalogFile)) {
-    catalog = "missing";
-  } else {
-    const onDisk = fs.readFileSync(catalogFile, "utf8");
-    catalog = onDisk === renderSkillCatalog(root, manifest, { skip: catalogSkip }) ? "in-sync" : "stale";
-  }
-  const routerFile = path.join(root, "agents", `${ROUTER_AGENT_NAME}.md`);
-  let router;
-  if (!fs.existsSync(routerFile)) {
-    router = "missing";
-  } else {
-    const onDisk = fs.readFileSync(routerFile, "utf8");
-    router = onDisk === renderRouterAgent({ root }) ? "in-sync" : "stale";
-  }
-  const claudeRouterFile = path.join(root, "agents-claude", `${ROUTER_AGENT_NAME}.md`);
-  const claudeRouter = !fs.existsSync(claudeRouterFile) ? "missing"
-    : fs.readFileSync(claudeRouterFile, "utf8") === renderClaudeRouterAgent({ root }) ? "in-sync" : "stale";
-  let claudeInstall = "n/a";
+  const catalog = fileState(path.join(root, "catalog", "skill-catalog.md"),
+    () => renderSkillCatalog(root, manifest, { skip: catalogSkip }));
+  const router = fileState(path.join(root, "agents", `${ROUTER_AGENT_NAME}.md`),
+    () => renderRouterAgent({ root }));
+  const claudeRouter = fileState(path.join(root, "agents-claude", `${ROUTER_AGENT_NAME}.md`),
+    () => renderClaudeRouterAgent({ root }));
+  let claudeInstall = STATE.NA;
   const claudeHome = opts.claudeHome;
   if (opts.claudeError) {
     warnings.push(`claude: ${opts.claudeError}`);
-    claudeInstall = "error";
+    claudeInstall = STATE.ERROR;
   }
   if (claudeHome && fs.existsSync(claudeHome)) try {
     const agentsState = claudeAgentsInstallState(root, path.join(claudeHome, "agents"));
@@ -1246,16 +1227,15 @@ export function statusOf(root, manifest, opts = {}) {
     for (const n of claudeSkillsRefused(root, skillsDir)) {
       warnings.push(`claude skill ${n}: ${path.join(skillsDir, n, "SKILL.md")} exists and was not generated by skill-router`);
     }
-    claudeInstall = stale ? "stale" : "in-sync";
+    claudeInstall = stale ? STATE.STALE : STATE.IN_SYNC;
   } catch (e) {
     warnings.push(`claude: status check skipped (${e.message})`);
-    claudeInstall = "stale";
+    claudeInstall = STATE.STALE;
   }
-  const ok = rows.every(r => r.clone === "ok" && r.agent === "in-sync"
-    && (r.vibe === "in-sync" || r.vibe === "—")
-    && (r.claude === "in-sync" || r.claude === "—")) && catalog === "in-sync"
-    && router === "in-sync" && claudeRouter === "in-sync"
-    && (claudeInstall === "n/a" || claudeInstall === "in-sync");
+  const ok = rows.every(r => r.clone === "ok" && r.agent === STATE.IN_SYNC
+    && isSettled(r.vibe) && isSettled(r.claude)) && catalog === STATE.IN_SYNC
+    && router === STATE.IN_SYNC && claudeRouter === STATE.IN_SYNC
+    && (claudeInstall === STATE.NA || claudeInstall === STATE.IN_SYNC);
   return { rows, dropped, warnings, catalog, router, claudeRouter, claudeInstall, exitCode: ok ? 0 : 1 };
 }
 
