@@ -733,7 +733,9 @@ function normRule(rule, home = os.homedir()) {
   else return `Read(${p})`;
   const g = p.search(/[*?\[{]/);
   const head = g < 0 ? p : p.slice(0, p.lastIndexOf("/", g));
-  return `Read(${realPath(head)}${p.slice(head.length)})`;
+  // Canonical form is the // absolute spelling, so it never equals a single-slash
+  // rule (a different directory in user settings).
+  return `Read(/${realPath(head)}${p.slice(head.length)})`;
 }
 
 function claudeAllowList(parsed) {

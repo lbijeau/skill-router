@@ -224,15 +224,28 @@ Known work left over from the Claude Code target (PR #4), none of it blocking.
   `statusOf` parses `settings.json` twice. Return `{ stale, refused }` from one
   function, and let `hasClaudeReadRules` report an unparseable file itself.
 
+**Review leftovers (from PR A)**
+- No test covers the restart and `/reload-skills` reminders surviving a step that
+  fails after creating its directory; that needs a fault-injection seam. The
+  reminders can also fire for an empty directory when the write that followed
+  failed, or when no agent is valid.
+- `normRule` resolves a rule whose glob is in the first path segment
+  (`Read(//**)`) against the current directory, and `hasClaudeReadRules` throws
+  on a `null` home. The injected home reaches the rule functions and
+  `resolveClaudeHome`, but not `statusOf` or `runClaudeInstall`.
+- `runCli` falls back to the real `~/.pi` and `~/.vibe` config if a test omits
+  `settingsPath` or `vibeConfigPath`. The "route-skill never lands in the pi
+  skills home" test could pre-create the directory and assert it stays empty.
+
 **Naming**
 - `normRule`, `step`, the `skip` helper in `mergeClaudePermissions`, and
   `claudeText` (a markdown helper built on a TOML-named function) could be
   clearer; `writeClaudeRouterAgent` is a thin wrapper.
 
 **Deferred by design**
-- `settings.json.bak` is overwritten by each merge and is created at the default
-  mode before being set to 0600 (a window of a few milliseconds); `--no-claude`
-  is not sticky.
+- `settings.json.bak` is overwritten by each merge, and the temporary file it is
+  written through exists for a few milliseconds at the default mode before being
+  set to 0600 and renamed; `--no-claude` is not sticky.
 - A clone symlink sweep (the live probe showed reads through a symlink in a
   clone prompt, so it is not needed today), an uninstall helper, and putting the
   checkout path in the ownership marker. Two checkouts installing into one

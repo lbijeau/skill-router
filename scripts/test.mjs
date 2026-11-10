@@ -2381,6 +2381,22 @@ test("mergeClaudePermissions: a same-size change with a different mtime mid-merg
   clean(dir);
 });
 
+test("hasClaudeReadRules and mergeClaudePermissions: a single-slash rule is a different directory from the // absolute rule", () => {
+  const base = tmp(); fs.mkdirSync(path.join(base, "x/skills"), { recursive: true });
+  const real = fs.realpathSync(base);
+  const abs = "Read(/" + path.join(real, "x/skills/**") + ")";               // //abs form
+  const single = "Read(" + path.join(real, "x/skills/**") + ")";             // /abs form: relative to the settings dir in user settings
+  const sp = path.join(base, "settings.json");
+  fs.writeFileSync(sp, JSON.stringify({ permissions: { allow: [single] } }));
+  eq(gen.hasClaudeReadRules(sp, [abs]), false);
+  const r = gen.mergeClaudePermissions(sp, [abs]);
+  eq(r.changed, true);
+  eq(JSON.parse(fs.readFileSync(sp, "utf8")).permissions.allow.length, 2);
+  eq(gen.hasClaudeReadRules(sp, [abs]), true);
+  eq(gen.hasClaudeReadRules(sp, [single]), true);                             // and the single-slash rule still matches itself
+  clean(base);
+});
+
 process.exitCode = await (async () => {
   let failed = 0;
   for (const t of tests) {
