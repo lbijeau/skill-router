@@ -713,7 +713,7 @@ export function claudeAgentsInstallState(root, agentsDir) {
 export function claudeReadRules(repoRoot, home = os.homedir()) {
   const real = realPath(path.resolve(repoRoot));
   const homeReal = realPath(path.resolve(home));
-  if (/[*?\[\]{}()]/.test(real)) {
+  if (/[*?\[\]{}()\\]/.test(real)) {
     return { rules: [], error: `checkout path contains rule metacharacters: ${real}` };
   }
   const base = real === homeReal || real.startsWith(homeReal + path.sep)
@@ -722,14 +722,18 @@ export function claudeReadRules(repoRoot, home = os.homedir()) {
   return { rules: [`Read(${base}/skills/**)`, `Read(${base}/catalog/**)`] };
 }
 
-// ~/ and // spellings of the same path compare equal.
-function normRule(rule) {
+// ~/ and // spellings of the same path compare equal, and the directory part
+// is resolved through symlinks (Claude Code matches on the resolved path).
+function normRule(rule, home = os.homedir()) {
   const m = String(rule).match(/^Read\((.*)\)$/);
   if (!m) return String(rule);
   let p = m[1];
-  if (p.startsWith("~/")) p = path.join(os.homedir(), p.slice(2));
+  if (p.startsWith("~/")) p = path.join(home, p.slice(2));
   else if (p.startsWith("//")) p = p.slice(1);
-  return `Read(${p})`;
+  else return `Read(${p})`;
+  const g = p.search(/[*?\[{]/);
+  const head = g < 0 ? p : p.slice(0, p.lastIndexOf("/", g));
+  return `Read(${realPath(head)}${p.slice(head.length)})`;
 }
 
 function claudeAllowList(parsed) {
@@ -737,8 +741,8 @@ function claudeAllowList(parsed) {
   return Array.isArray(allow) ? allow : [];
 }
 
-// `hooks.onBeforeCommit` is a test seam, called after the backup and before
-// the final re-check of the file.
+// `hooks.home` overrides the home used to expand `~/` rules; `hooks.onBeforeCommit`
+// is a test seam, called after the backup and before the final re-check.
 export function mergeClaudePermissions(settingsPath, rules, hooks = {}) {
   let target = settingsPath;
   const skip = (error) => ({ changed: false, added: [], error });
@@ -769,8 +773,8 @@ export function mergeClaudePermissions(settingsPath, rules, hooks = {}) {
     return skip("permissions.allow is not an array, merge skipped");
   }
   const list = claudeAllowList(existing);
-  const present = new Set(list.map(normRule));
-  const added = rules.filter(r => !present.has(normRule(r)));
+  const present = new Set(list.map(r => normRule(r, hooks.home)));
+  const added = rules.filter(r => !present.has(normRule(r, hooks.home)));
   if (added.length === 0) return { changed: false, added: [] };
   const next = { ...existing, permissions: { ...existing.permissions, allow: [...list, ...added] } };
   atomicWrite(target + ".bak", raw, 0o600);
@@ -783,11 +787,11 @@ export function mergeClaudePermissions(settingsPath, rules, hooks = {}) {
   return { changed: true, added };
 }
 
-export function hasClaudeReadRules(settingsPath, rules) {
+export function hasClaudeReadRules(settingsPath, rules, home) {
   let parsed;
   try { parsed = JSON.parse(fs.readFileSync(settingsPath, "utf8")); } catch { return false; }
-  const present = new Set(claudeAllowList(parsed).map(normRule));
-  return rules.every(r => present.has(normRule(r)));
+  const present = new Set(claudeAllowList(parsed).map(r => normRule(r, home)));
+  return rules.every(r => present.has(normRule(r, home)));
 }
 
 export const GLOBAL_SKILL_MARKER = "overwritten by skill-router install/update";

@@ -2233,6 +2233,43 @@ test("claudeAgentsInstallState: owned orphans are not stale when no source is va
   clean(root); clean(path.dirname(dest));
 });
 
+test("claudeReadRules: a backslash in the checkout path is refused", () => {
+  const home = tmp(), base = tmp(); const weird = path.join(base, "we\\ird");
+  fs.mkdirSync(weird);
+  const r = gen.claudeReadRules(weird, home);
+  eq(r.rules.length, 0);
+  eq(/metachar/i.test(r.error), true);
+  clean(home); clean(base);
+});
+
+test("hasClaudeReadRules and mergeClaudePermissions: a rule written through a symlinked path is the same rule", () => {
+  const base = tmp(), home = tmp();
+  fs.mkdirSync(path.join(base, "real/sr"), { recursive: true });
+  fs.symlinkSync(path.join(base, "real"), path.join(base, "link"));
+  const { rules } = gen.claudeReadRules(path.join(base, "real/sr"), home);
+  const viaLink = rules.map(r => "Read(/" + path.join(base, "link/sr", r.includes("/skills/") ? "skills/**" : "catalog/**") + ")");
+  const sp = path.join(base, "settings.json");
+  fs.writeFileSync(sp, JSON.stringify({ permissions: { allow: viaLink } }));
+  eq(gen.hasClaudeReadRules(sp, rules, home), true);
+  const r = gen.mergeClaudePermissions(sp, rules, { home });
+  eq(r.changed, false);
+  eq(JSON.parse(fs.readFileSync(sp, "utf8")).permissions.allow.length, 2);   // no duplicate added
+  clean(base); clean(home);
+});
+
+test("hasClaudeReadRules: different directories are never equal, and an injected home is honoured for ~/ rules", () => {
+  const base = tmp(), H = tmp();
+  fs.mkdirSync(path.join(H, "x/skills"), { recursive: true });
+  fs.mkdirSync(path.join(base, "y/skills"), { recursive: true });
+  const sp = path.join(base, "settings.json");
+  fs.writeFileSync(sp, JSON.stringify({ permissions: { allow: ["Read(~/x/skills/**)"] } }));
+  const abs = "Read(/" + path.join(H, "x/skills/**") + ")";
+  eq(gen.hasClaudeReadRules(sp, [abs], H), true);                             // ~ expands with the injected home
+  eq(gen.hasClaudeReadRules(sp, [abs]), false);                               // real home: a different directory
+  eq(gen.hasClaudeReadRules(sp, ["Read(/" + path.join(base, "y/skills/**") + ")"], H), false);
+  clean(base); clean(H);
+});
+
 process.exitCode = await (async () => {
   let failed = 0;
   for (const t of tests) {
