@@ -89,6 +89,21 @@ Then:
 - Removing or renaming a manifest entry prunes its agent file and clone on
   the next run.
 
+## Code layout
+
+`scripts/generate.mjs` is the entry point and still re-exports everything, so
+`scripts/test.mjs` and `install.sh` use it unchanged. The code behind it is split
+so that imports only point down this list (each file imports from the ones
+above it, never from below), which keeps the graph acyclic:
+
+- `scripts/common.mjs`: shared helpers (paths, text normalising, atomic writes,
+  status constants, the router body).
+- `scripts/discover.mjs`: finding and parsing the skills in a clone.
+- `scripts/claude.mjs`: everything for the Claude Code target (rendering,
+  ownership, installer, permissions merge, skills sync, install status).
+- `scripts/generate.mjs`: the manifest, the pi and Vibe targets, catalog, prune,
+  status, install flow and CLI.
+
 ## route-skill
 
 `route-skill` is a global pi skill (synced to `~/.pi/agent/skills/route-skill/`)
@@ -207,11 +222,6 @@ this checkout from `permissions.allow` in `~/.claude/settings.json`, and delete
 
 Known work left over from the Claude Code target (PR #4), none of it blocking.
 
-**Structure**
-- `scripts/generate.mjs` is about 1,500 lines covering rendering, install,
-  permissions merge, skills sync, status and the CLI. Split the Claude parts
-  into their own module (for example `claude.mjs`).
-
 **Review leftovers (from PR A)**
 - No test covers the restart and `/reload-skills` reminders surviving a step that
   fails after creating its directory; that needs a fault-injection seam. The
@@ -229,6 +239,17 @@ Known work left over from the Claude Code target (PR #4), none of it blocking.
   such as `runInstall(root, settingsPath, vibeConfigPath)` silently falls back to
   the real pi and Vibe config, and `runInstall(root, null)` throws. A
   `typeof paths !== "object"` guard in `flowPaths` would catch both.
+
+**Review leftovers (from PR C)**
+- `generate.mjs` re-exports the three modules with `export *`, so it now exposes
+  eight extra names (`NAME_RE`, `STATE`, `atomicWrite`, `isSymlink`,
+  `normalizeText`, `realPath`, `runClaudeInstall`, `pruneClaudeAgents`), and no
+  test pins the export list: a future same-named export in two modules would
+  vanish from the re-export silently. A one-line test, or explicit named
+  re-exports, would close that.
+- `isSymlink` lives in `common.mjs` but only `claude.mjs` uses it;
+  `pruneClaudeAgents` sits at the end of `claude.mjs`, far from `ownedOrphans`;
+  `prune` could write `const claudeAgents = pruneClaudeAgents(root, names)`.
 
 **Naming**
 - `writeClaudeRouterAgent` is a thin wrapper kept for symmetry with

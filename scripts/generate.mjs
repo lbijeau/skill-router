@@ -2,12 +2,17 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { spawnSync } from "node:child_process";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { pathToFileURL } from "node:url";
+import { NAME_RE, REPO_ROOT, ROUTER_AGENT_NAME, ROUTER_DESCRIPTION, STATE, atomicWrite, normalizeText, realPath, routerBodyLines, skillRows, tildePath, yamlQuote } from "./common.mjs";
+import { discoverSkills } from "./discover.mjs";
+import { claudeInstallStatus, claudeSkipReason, isOwnedClaudeAgent, pruneClaudeAgents, renderClaudeAgentFile, renderClaudeRouterAgent, resolveClaudeHome, runClaudeInstall, writeClaudeAgentFiles, writeClaudeRouterAgent } from "./claude.mjs";
 
-export const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+export * from "./common.mjs";
+export * from "./discover.mjs";
+export * from "./claude.mjs";
 
-const NAME_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 const REQUIRED_FIELDS = ["url", "description", "persona"];
+
 const URL_RE = /^(https:\/\/[\w.-]+(?:\/[\w._~-]+)+\/?|file:\/\/\/[\w.~\/-]+)$/;
 
 export function loadManifest(root) {
@@ -57,146 +62,6 @@ export function loadManifest(root) {
   return { repos: parsed.repos };
 }
 
-export function globToRegExp(pattern) {
-  const escaped = pattern.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, "\\$&");
-  const translated = escaped
-    .replace(/\\\*\\\*/g, ".*")
-    .replace(/\\\*/g, "[^/]*");
-  return new RegExp(`^${translated}$`);
-}
-
-const SKIP_DIRS = new Set([".git", "node_modules", "tests", "test"]);
-
-function walkSkillDirs(dir, out = [], warnings = []) {
-  let entries;
-  try { entries = fs.readdirSync(dir, { withFileTypes: true }); }
-  catch { return out; }
-  if (entries.some(e => e.isFile() && e.name === "SKILL.md")) out.push(dir);
-  for (const e of entries) {
-    if (e.isSymbolicLink() && e.name === "SKILL.md") {
-      warnings.push(`symlinked SKILL.md skipped: ${path.join(dir, e.name)}`);
-    }
-  }
-  const children = entries
-    .filter(e => e.isDirectory())
-    .map(e => e.name)
-    .filter(n => !n.startsWith(".") && !SKIP_DIRS.has(n))
-    .sort();
-  for (const n of children) walkSkillDirs(path.join(dir, n), out, warnings);
-  return out;
-}
-
-const BLOCK_SCALAR_RE = /^[|>](?:[0-9]*[+-]?|[+-][0-9]*)$/;
-
-function normalizeDescription(val) {
-  if (val == null) return null;
-  const s = String(val)
-    .replace(/\t/g, " ")
-    .replace(/[\u0000-\u0008\u000B-\u001F\u007F-\u009F]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  if (s === "") return null;
-  if (s.length <= 240) return s;
-  for (let j = 0; j < 240; j++) {
-    if ((s[j] === "." || s[j] === "!" || s[j] === "?") && s[j + 1] === " ") {
-      return s.slice(0, j + 1);
-    }
-  }
-  for (let j = 239; j >= 0; j--) {
-    if (s[j] === " ") return s.slice(0, j) + "…";
-  }
-  return s.slice(0, 240) + "…";
-}
-
-export function parseSkillFrontmatter(content) {
-  const lines = content.replace(/^\uFEFF/, "").split("\n");
-  const out = { closed: false, name: null, description: null };
-  if (lines[0].trimEnd() !== "---") return out;
-  let i = 1;
-  while (i < lines.length) {
-    const line = lines[i].trimEnd();
-    if (line === "---") { out.closed = true; break; }
-    const d = line.match(/^description:[ \t]*(.*)$/);
-    if (d) {
-      let val = d[1].trim();
-      if (BLOCK_SCALAR_RE.test(val)) {
-        const parts = [];
-        i++;
-        while (i < lines.length) {
-          const blk = lines[i];
-          if (blk === "" || /^[ \t]/.test(blk)) {
-            if (blk.trim() !== "") parts.push(blk.trim());
-            i++;
-          } else break;
-        }
-        val = parts.join(" ");
-        out.description = normalizeDescription(val);
-        continue;
-      }
-      if (val.length >= 2
-        && ((val[0] === '"' && val[val.length - 1] === '"')
-          || (val[0] === "'" && val[val.length - 1] === "'"))) {
-        val = val.slice(1, -1);
-      }
-      out.description = normalizeDescription(val);
-    } else {
-      const m = line.match(/^name:[ \t]*(.*?)[ \t]*$/);
-      if (m) out.name = m[1];
-    }
-    i++;
-  }
-  return out;
-}
-
-export function discoverSkills(cloneDir, entry) {
-  const walkRoot = path.join(cloneDir, entry.skillSource ?? ".");
-  const excludes = (entry.pathExclude ?? []).map(globToRegExp);
-  const warnings = [];
-  const skills = [];
-  const dropped = [];
-  const byName = new Map();
-  for (const dir of walkSkillDirs(walkRoot, [], warnings)) {
-    const relDir = path.relative(cloneDir, dir);
-    if (excludes.some(re => re.test(relDir))) continue;
-    const file = path.join(dir, "SKILL.md");
-    let content;
-    try { content = fs.readFileSync(file, "utf8"); }
-    catch (e) { warnings.push(`unreadable ${file}: ${e.message}`); continue; }
-    if (content.replace(/^\uFEFF/, "").split("\n")[0].trimEnd() !== "---") {
-      warnings.push(`malformed frontmatter in ${file}: no opening ---`);
-      continue;
-    }
-    const parsed = parseSkillFrontmatter(content);
-    if (!parsed.closed) {
-      warnings.push(`malformed frontmatter in ${file}: no closing ---`);
-      continue;
-    }
-    let name = parsed.name;
-    if (name === null || name === "") name = path.basename(dir);
-    if (!NAME_RE.test(name) || name.length > 64) {
-      warnings.push(`unexpressible skill name: ${JSON.stringify(name)} in ${dir}`);
-      continue;
-    }
-    const existing = byName.get(name);
-    if (existing) {
-      dropped.push({ name, keptDir: existing.dir, droppedDir: dir });
-    } else {
-      const ref = { name, dir, description: parsed.description };
-      byName.set(name, ref);
-      skills.push(ref);
-    }
-  }
-  return { skills, dropped, warnings };
-}
-
-// Full double-quoted YAML scalar: `description: ${yamlQuote(x)}`.
-export function yamlQuote(s) {
-  return '"' + String(s)
-    .replace(/\\/g, "\\\\")
-    .replace(/"/g, '\\"')
-    .replace(/\n/g, "\\n") + '"';
-}
-
 export function renderAgentFile(entry, skillNames) {
   return [
     "---",
@@ -212,6 +77,7 @@ export function renderAgentFile(entry, skillNames) {
 }
 
 export const VIBE_MARKER = "You have no skill tool; if one is offered anyway, do not use it.";
+
 export const VIBE_BOILERPLATE = [
   VIBE_MARKER,
   "Your skills are files. When a task matches one, read its SKILL.md with read_file and follow it.",
@@ -219,39 +85,8 @@ export const VIBE_BOILERPLATE = [
   "If a read comes back truncated, say so.",
 ].join("\n");
 
-function normalizeText(s, { keepNewlines = false } = {}) {
-  let out = String(s)
-    .replace(/\r\n?/g, "\n")
-    .replace(/\t/g, " ")
-    .replace(/[\u0000-\u0008\u000B-\u001F\u007F]/g, " ");
-  if (!keepNewlines) out = out.replace(/\n/g, " ");
-  return out.replace(/[ ]{2,}/g, " ").trim();
-}
-
 function tomlEscape(s) {
   return s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-}
-
-// Home-anchored paths keep the committed Vibe artifacts machine-independent
-// (no username baked into git). Vibe's file tools expanduser() every path, so
-// ~ resolves at runtime; outside home the absolute path is the only anchor.
-export function tildePath(absPath, home = os.homedir()) {
-  const p = path.resolve(absPath);
-  const h = path.resolve(home);
-  if (p === h) return "~";
-  if (p.startsWith(h + path.sep)) return "~/" + p.slice(h.length + 1);
-  return p;
-}
-
-// One `- name: description — ~/path/SKILL.md` row per skill; `escape` is the
-// target format's string escaper (identity for markdown).
-export function skillRows(skills, home, escape = x => x) {
-  return skills.map(s => {
-    const file = tildePath(path.join(s.dir, "SKILL.md"), home);
-    return s.description
-      ? `- ${s.name}: ${escape(s.description)} — ${file}`
-      : `- ${s.name} — ${file}`;
-  });
 }
 
 export function renderVibeAgentTOML(entry, skills, { home } = {}) {
@@ -272,97 +107,6 @@ export function renderVibeAgentTOML(entry, skills, { home } = {}) {
     '"""',
     "",
   ].join("\n");
-}
-
-export const CLAUDE_MARKER = "<!-- generated by skill-router -->";
-export const CLAUDE_TOOLS_LINE = "tools: Read, Grep, Glob";
-export const RESERVED_AGENT_NAMES = new Set(["general-purpose", "explore", "plan", "skill-router"]);
-export const CLAUDE_BOILERPLATE = [
-  "You have no Skill tool; if one is offered anyway, do not use it.",
-  "Your skills are files. When a task matches one, read its SKILL.md with the Read tool and follow it.",
-  "If a skill's instructions tell you to use or load another skill, read that skill's SKILL.md the same way and follow it.",
-  "If a read comes back truncated, say so.",
-].join("\n");
-
-// normalizeText (shared by the TOML and markdown renderers) plus the Unicode line breaks YAML and markdown also treat as newlines.
-export function claudeText(s, { keepNewlines = false } = {}) {
-  return normalizeText(String(s).replace(/[\u0085\u2028\u2029]/g, "\n"), { keepNewlines });
-}
-
-// The four frontmatter keys, once each, in this order; validateClaudeAgentSource
-// accepts exactly this shape.
-function claudeFrontmatter(name, description) {
-  return ["---", `name: ${name}`, `description: ${yamlQuote(description)}`, CLAUDE_TOOLS_LINE, "omitClaudeMd: true", "---"];
-}
-
-export function renderClaudeAgentFile(entry, skills, { home } = {}) {
-  const description = claudeText(entry.description);
-  if (description === "") throw new Error(`${entry.name}: empty description`);
-  return [
-    ...claudeFrontmatter(entry.name, description),
-    claudeText(entry.persona, { keepNewlines: true }),
-    "",
-    CLAUDE_BOILERPLATE,
-    "",
-    ...skillRows(skills ?? [], home ?? os.homedir()),
-    "",
-    CLAUDE_MARKER,
-    "",
-  ].join("\n");
-}
-
-// The one ownership test: regular file (not a symlink), last non-empty line is
-// the marker, frontmatter name equals the file stem. Used by prune and installer.
-export function isOwnedClaudeAgent(file) {
-  let st;
-  try { st = fs.lstatSync(file); } catch { return false; }
-  if (!st.isFile()) return false;
-  let text;
-  try { text = fs.readFileSync(file, "utf8"); } catch { return false; }
-  const lines = text.split("\n");
-  while (lines.length && lines[lines.length - 1] === "") lines.pop();
-  if (lines[lines.length - 1] !== CLAUDE_MARKER) return false;
-  if (lines[0] !== "---") return false;
-  const end = lines.indexOf("---", 1);
-  if (end < 0) return false;
-  const nameLine = lines.slice(1, end).find(l => l.startsWith("name: "));
-  return nameLine === `name: ${path.basename(file).replace(/\.md$/, "")}`;
-}
-
-// Why an entry gets no Claude agent regardless of its skills, or null.
-export function claudeSkipReason(entry) {
-  if (RESERVED_AGENT_NAMES.has(entry.name.toLowerCase())) return "reserved agent name";
-  if (claudeText(entry.description) === "") return "empty description";
-  return null;
-}
-
-export function writeClaudeAgentFiles(root, manifest, skip = new Set()) {
-  const agentsDir = path.join(root, "agents-claude");
-  fs.mkdirSync(agentsDir, { recursive: true });
-  const written = [], removed = [], warnings = [];
-  for (const entry of manifest.repos) {
-    if (skip.has(entry.name)) continue;
-    const reason = claudeSkipReason(entry);
-    if (reason) {
-      warnings.push(`${entry.name}: ${reason}, no claude agent written`);
-      const stale = path.join(agentsDir, `${entry.name}.md`);
-      if (entry.name !== ROUTER_AGENT_NAME && isOwnedClaudeAgent(stale)) {
-        fs.rmSync(stale);
-        removed.push(entry.name);
-      }
-      continue;
-    }
-    const found = discoverSkills(path.join(root, "skills", entry.name), entry);
-    const file = path.join(agentsDir, `${entry.name}.md`);
-    if (found.skills.length > 0) {
-      fs.writeFileSync(file, renderClaudeAgentFile(entry, found.skills));
-      written.push(entry.name);
-    } else if (isOwnedClaudeAgent(file)) {
-      fs.rmSync(file);
-      removed.push(entry.name);
-    }
-  }
-  return { written, removed, warnings };
 }
 
 export function writeAgentFiles(root, manifest, skip = new Set()) {
@@ -405,8 +149,6 @@ export function writeVibeAgentFiles(root, manifest, skip = new Set()) {
   return { written, removed };
 }
 
-export const ROUTER_AGENT_NAME = "skill-router";
-
 // Global skills live committed under global-skills/<name>/SKILL.md and are
 // synced (overwritten) into the pi skills home on every install/update: they
 // are generated-style boilerplate, and user edits do not survive updates.
@@ -428,25 +170,6 @@ export function syncGlobalSkills(root, skillsHome) {
   return { written, skipped };
 }
 
-export const ROUTER_DESCRIPTION = "Routes a described situation to the best skill across all pinned repos; returns skill, path, and digest";
-
-// Router persona body, no trailing newline element; shared by pi and Claude.
-export function routerBodyLines(root, home) {
-  const catalogPath = tildePath(path.join(root, "catalog", "skill-catalog.md"), home);
-  return [
-    "You are the skill router over every repo pinned in this repo's manifest.",
-    `First, read the catalog at ${catalogPath}. It lists every skill in every pinned repo, with a one-line description and the path to its SKILL.md.`,
-    "",
-    "Match the caller's situation to the catalog. When two skills are close, open both SKILL.md files and say which one fits and why the other does not.",
-    "",
-    "Open the winning SKILL.md and return: the skill name, its path, why it fits, and a short digest of the real file. Never answer from the catalog description alone.",
-    "",
-    "Recommend and stop. Do not execute the skill, edit files, or start the work.",
-    "",
-    "If nothing fits, say so plainly; do not force a nearest match.",
-  ];
-}
-
 export function renderRouterAgent({ root = REPO_ROOT, home } = {}) {
   return [
     "---",
@@ -457,24 +180,6 @@ export function renderRouterAgent({ root = REPO_ROOT, home } = {}) {
     ...routerBodyLines(root, home),
     "",
   ].join("\n");
-}
-
-export function renderClaudeRouterAgent({ root = REPO_ROOT, home } = {}) {
-  return [
-    ...claudeFrontmatter(ROUTER_AGENT_NAME, ROUTER_DESCRIPTION),
-    ...routerBodyLines(root, home),
-    "",
-    CLAUDE_MARKER,
-    "",
-  ].join("\n");
-}
-
-export function writeClaudeRouterAgent(root) {
-  const agentsDir = path.join(root, "agents-claude");
-  fs.mkdirSync(agentsDir, { recursive: true });
-  const file = path.join(agentsDir, `${ROUTER_AGENT_NAME}.md`);
-  fs.writeFileSync(file, renderClaudeRouterAgent({ root }));
-  return { file, written: true };
 }
 
 export function writeRouterAgent(root) {
@@ -569,11 +274,7 @@ export function prune(root, manifest) {
       }
     }
   }
-  const claudeDir = path.join(root, "agents-claude");
-  for (const stem of ownedOrphans(claudeDir, new Set([...names, ROUTER_AGENT_NAME]))) {
-    fs.rmSync(path.join(claudeDir, `${stem}.md`));
-    claudeAgents.push(stem);
-  }
+  claudeAgents.push(...pruneClaudeAgents(root, names));
   const skillsDir = path.join(root, "skills");
   if (fs.existsSync(skillsDir)) {
     for (const d of fs.readdirSync(skillsDir, { withFileTypes: true })) {
@@ -588,296 +289,6 @@ export function prune(root, manifest) {
 
 function expandTilde(p) {
   return p.startsWith("~/") ? path.join(os.homedir(), p.slice(2)) : p;
-}
-
-function atomicWrite(file, content, mode) {
-  const tmpf = `${file}.tmp-${process.pid}`;
-  fs.writeFileSync(tmpf, content);
-  if (mode !== undefined) fs.chmodSync(tmpf, mode);
-  fs.renameSync(tmpf, file);
-}
-
-// Frontmatter-level checks on a committed agents-claude/ file before it may be
-// installed. A file missing its `tools:` line would inherit every tool, so a
-// truncated or hand-edited source must never reach ~/.claude/agents.
-export function validateClaudeAgentSource(content, stem) {
-  if (!NAME_RE.test(stem)) return "invalid agent name";
-  const lines = content.split("\n");
-  if (lines[0] !== "---") return "no frontmatter";
-  const end = lines.indexOf("---", 1);
-  if (end < 0) return "unclosed frontmatter";
-  const fm = lines.slice(1, end);
-  // Exactly the four keys the generator writes, once each, in order: any other
-  // key (permissionMode, hooks, mcpServers, skills, model...) could widen what
-  // the agent may do.
-  const keyOf = l => (l.match(/^([A-Za-z]+): /) || [])[1];
-  if (fm.map(keyOf).join() !== "name,description,tools,omitClaudeMd") return "unexpected frontmatter keys";
-  if (fm[0] !== `name: ${stem}`) return "name does not match file name";
-  if (fm[2] !== CLAUDE_TOOLS_LINE) return "tools line missing or different";
-  if (fm[3] !== "omitClaudeMd: true") return "omitClaudeMd: true missing";
-  while (lines.length && lines[lines.length - 1] === "") lines.pop();
-  if (lines[lines.length - 1] !== CLAUDE_MARKER) return "missing ownership marker";
-  return null;
-}
-
-// Stems of owned generated agents in `dir` whose stem is not in `known`.
-function ownedOrphans(dir, known) {
-  if (!fs.existsSync(dir)) return [];
-  const out = [];
-  for (const f of fs.readdirSync(dir)) {
-    const m = f.match(/^(.*)\.md$/);
-    if (m && !known.has(m[1]) && isOwnedClaudeAgent(path.join(dir, f))) out.push(m[1]);
-  }
-  return out;
-}
-
-function readClaudeSources(root) {
-  const dir = path.join(root, "agents-claude");
-  let names;
-  try { names = fs.readdirSync(dir).filter(f => f.endsWith(".md")).sort(); }
-  catch { return []; }
-  const out = [];
-  for (const f of names) {
-    const file = path.join(dir, f);
-    let st;
-    try { st = fs.lstatSync(file); } catch { continue; }
-    if (!st.isFile()) continue;
-    const stem = f.replace(/\.md$/, "");
-    const content = fs.readFileSync(file, "utf8");
-    out.push({ stem, content, error: validateClaudeAgentSource(content, stem) });
-  }
-  return out;
-}
-
-// Contract: creates agentsDir (mkdir -p); the caller guarantees the Claude
-// home exists. Only ever writes, overwrites or deletes owned regular files.
-export function installClaudeAgents(root, agentsDir) {
-  const installed = [], pruned = [], refused = [], invalid = [];
-  const sources = readClaudeSources(root);
-  const dirCreated = !fs.existsSync(agentsDir);
-  fs.mkdirSync(agentsDir, { recursive: true });
-  for (const src of sources) {
-    if (src.error) { invalid.push({ name: src.stem, reason: src.error }); continue; }
-    const dest = path.join(agentsDir, `${src.stem}.md`);
-    if (fs.existsSync(dest) || isSymlink(dest)) {
-      if (!isOwnedClaudeAgent(dest)) { refused.push(src.stem); continue; }
-      if (fs.readFileSync(dest, "utf8") === src.content) continue;
-    }
-    atomicWrite(dest, src.content);
-    installed.push(src.stem);
-  }
-  const known = new Set(sources.map(x => x.stem));
-  const pruneSkipped = !sources.some(x => !x.error);
-  if (!pruneSkipped) {
-    for (const stem of ownedOrphans(agentsDir, known)) {
-      fs.rmSync(path.join(agentsDir, `${stem}.md`));
-      pruned.push(stem);
-    }
-  }
-  return { installed, pruned, refused, invalid, pruneSkipped, dirCreated };
-}
-
-function isSymlink(p) {
-  try { return fs.lstatSync(p).isSymbolicLink(); } catch { return false; }
-}
-
-// Read-only: installed copies versus the committed agents-claude/ files.
-export function claudeAgentsInstallState(root, agentsDir) {
-  const details = [], refused = [];
-  const sources = readClaudeSources(root);
-  const valid = sources.filter(x => !x.error);
-  if (!fs.existsSync(agentsDir)) {
-    if (valid.length) details.push(`${agentsDir} missing`);
-    return { state: details.length ? "stale" : "in-sync", refused, details };
-  }
-  for (const src of valid) {
-    const dest = path.join(agentsDir, `${src.stem}.md`);
-    if (!fs.existsSync(dest) && !isSymlink(dest)) { details.push(`${src.stem}: not installed`); continue; }
-    if (!isOwnedClaudeAgent(dest)) { refused.push(src.stem); continue; }
-    if (fs.readFileSync(dest, "utf8") !== src.content) details.push(`${src.stem}: installed copy differs`);
-  }
-  // The installer prunes only when at least one source is valid; mirror that.
-  if (valid.length) {
-    for (const stem of ownedOrphans(agentsDir, new Set(sources.map(x => x.stem)))) details.push(`${stem}: orphan`);
-  }
-  return { state: details.length ? "stale" : "in-sync", refused, details };
-}
-
-// Read allow rules for the Claude config: skills/** (clones) and catalog/**
-// (the router reads the catalog). Built from realpaths, because Claude Code
-// applies an allow rule only when the path and what it resolves to both match.
-export function claudeReadRules(repoRoot, home = os.homedir()) {
-  const real = realPath(path.resolve(repoRoot));
-  const homeReal = realPath(path.resolve(home));
-  if (/[*?\[\]{}()\\]/.test(real)) {
-    return { rules: [], error: `checkout path contains rule metacharacters: ${real}` };
-  }
-  const base = real === homeReal || real.startsWith(homeReal + path.sep)
-    ? "~/" + path.relative(homeReal, real)
-    : "/" + real;                                  // "//Users/..." absolute form
-  return { rules: [`Read(${base}/skills/**)`, `Read(${base}/catalog/**)`] };
-}
-
-// ~/ and // spellings of the same path compare equal, and the directory part
-// is resolved through symlinks (Claude Code matches on the resolved path).
-function normalizeReadRule(rule, home = os.homedir()) {
-  const m = String(rule).match(/^Read\((.*)\)$/);
-  if (!m) return String(rule);
-  let p = m[1];
-  if (p.startsWith("~/")) p = path.join(home, p.slice(2));
-  else if (p.startsWith("//")) p = p.slice(1);
-  else return `Read(${p})`;
-  const g = p.search(/[*?\[{]/);
-  const head = g < 0 ? p : p.slice(0, p.lastIndexOf("/", g));
-  // Canonical form is the // absolute spelling, so it never equals a single-slash
-  // rule (a different directory in user settings).
-  return `Read(/${realPath(head)}${p.slice(head.length)})`;
-}
-
-function claudeAllowList(parsed) {
-  const allow = parsed?.permissions?.allow;
-  return Array.isArray(allow) ? allow : [];
-}
-
-// `hooks.home` overrides the home used to expand `~/` rules; `hooks.onBeforeCommit`
-// is a test seam, called after the backup and before the final re-check.
-export function mergeClaudePermissions(settingsPath, rules, hooks = {}) {
-  let target = settingsPath;
-  const fail = (error) => ({ changed: false, added: [], error });
-  let isLink = false;
-  try { isLink = fs.lstatSync(settingsPath).isSymbolicLink(); } catch { /* absent: create at settingsPath */ }
-  if (isLink) {
-    try { target = fs.realpathSync(settingsPath); }
-    catch { return fail("settings.json is a dangling symlink, merge skipped"); }
-  }
-  if (!fs.existsSync(target)) {
-    fs.mkdirSync(path.dirname(target), { recursive: true });
-    atomicWrite(target, JSON.stringify({ permissions: { allow: [...rules] } }, null, 2) + "\n");
-    return { changed: true, added: [...rules] };
-  }
-  const before = fs.statSync(target);
-  const raw = fs.readFileSync(target, "utf8");
-  let existing;
-  try { existing = JSON.parse(raw); }
-  catch { return fail("unparseable settings file, merge skipped"); }
-  if (existing === null || typeof existing !== "object" || Array.isArray(existing)) {
-    return fail("settings file top level is not an object, merge skipped");
-  }
-  if ("permissions" in existing
-      && (existing.permissions === null || typeof existing.permissions !== "object" || Array.isArray(existing.permissions))) {
-    return fail("permissions is not an object, merge skipped");
-  }
-  if (existing.permissions && "allow" in existing.permissions && !Array.isArray(existing.permissions.allow)) {
-    return fail("permissions.allow is not an array, merge skipped");
-  }
-  const list = claudeAllowList(existing);
-  const present = new Set(list.map(r => normalizeReadRule(r, hooks.home)));
-  const added = rules.filter(r => !present.has(normalizeReadRule(r, hooks.home)));
-  if (added.length === 0) return { changed: false, added: [] };
-  const next = { ...existing, permissions: { ...existing.permissions, allow: [...list, ...added] } };
-  atomicWrite(target + ".bak", raw, 0o600);
-  hooks.onBeforeCommit?.();
-  const now = fs.statSync(target);
-  if (now.size !== before.size || now.mtimeMs !== before.mtimeMs) {
-    return fail("settings file changed during merge, skipped");
-  }
-  atomicWrite(target, JSON.stringify(next, null, 2) + "\n", before.mode & 0o777);
-  return { changed: true, added };
-}
-
-// "ok" | "missing-file" | "unparseable" | "missing-rules": one read of settings.json.
-export function claudeRulesState(settingsPath, rules, home) {
-  if (!fs.existsSync(settingsPath)) return "missing-file";
-  let parsed;
-  try { parsed = JSON.parse(fs.readFileSync(settingsPath, "utf8")); } catch { return "unparseable"; }
-  const present = new Set(claudeAllowList(parsed).map(r => normalizeReadRule(r, home)));
-  return rules.every(r => present.has(normalizeReadRule(r, home))) ? "ok" : "missing-rules";
-}
-
-export function hasClaudeReadRules(settingsPath, rules, home) {
-  return claudeRulesState(settingsPath, rules, home) === "ok";
-}
-
-export const GLOBAL_SKILL_MARKER = "overwritten by skill-router install/update";
-export const GLOBAL_SKILL_HEADER = "<!-- Generated-style boilerplate; " + GLOBAL_SKILL_MARKER;
-
-// Owned only if the boilerplate comment is the first thing after the
-// frontmatter; a user's file that merely mentions the phrase is not.
-function isOwnedSkillContent(content) {
-  const lines = content.split("\n");
-  if (lines[0] !== "---") return false;
-  const end = lines.indexOf("---", 1);
-  if (end < 0) return false;
-  const first = lines.slice(end + 1).find(l => l.trim() !== "");
-  return first !== undefined && first.startsWith(GLOBAL_SKILL_HEADER);
-}
-
-function claudeSkillSources(root) {
-  const srcDir = path.join(root, "global-skills-claude");
-  if (!fs.existsSync(srcDir)) return [];
-  const out = [];
-  for (const d of fs.readdirSync(srcDir, { withFileTypes: true })) {
-    const file = path.join(srcDir, d.name, "SKILL.md");
-    if (d.isDirectory() && fs.existsSync(file)) out.push({ name: d.name, content: fs.readFileSync(file, "utf8") });
-  }
-  return out;
-}
-
-// "absent" | "current" | "outdated" | "refused". Never overwrites a user's own
-// file: only absent files or files carrying the generated-boilerplate marker
-// are ours; symlinks and unreadable destinations are refused. Shared by the
-// installer and status so they cannot disagree.
-function skillDestStatus(skillsHome, src) {
-  const dir = path.join(skillsHome, src.name);
-  const dest = path.join(dir, "SKILL.md");
-  if (isSymlink(dir) || isSymlink(dest)) return "refused";
-  if (!fs.existsSync(dest)) return "absent";
-  let cur;
-  try { cur = fs.readFileSync(dest, "utf8"); } catch { return "refused"; }
-  if (!isOwnedSkillContent(cur)) return "refused";
-  return cur === src.content ? "current" : "outdated";
-}
-
-export function syncClaudeSkills(root, skillsHome) {
-  const written = [], refused = [];
-  const existed = fs.existsSync(skillsHome);
-  for (const src of claudeSkillSources(root)) {
-    const st = skillDestStatus(skillsHome, src);
-    if (st === "refused") { refused.push(src.name); continue; }
-    if (st === "current") continue;
-    const dir = path.join(skillsHome, src.name);
-    fs.mkdirSync(dir, { recursive: true });
-    atomicWrite(path.join(dir, "SKILL.md"), src.content);
-    written.push(src.name);
-  }
-  return { written, refused, dirCreated: !existed && fs.existsSync(skillsHome) };
-}
-
-// `stale`: something install would write. `refused`: user-owned destinations,
-// which install cannot fix and so are not stale.
-export function claudeSkillsStatus(root, skillsHome) {
-  let stale = false;
-  const refused = [];
-  for (const src of claudeSkillSources(root)) {
-    const st = skillDestStatus(skillsHome, src);
-    if (st === "absent" || st === "outdated") stale = true;
-    if (st === "refused") refused.push(src.name);
-  }
-  return { stale, refused };
-}
-
-function realPath(p) {
-  let cur = p;
-  let tail = "";
-  while (true) {
-    try { return path.join(fs.realpathSync(cur), tail); }
-    catch {
-      const next = path.dirname(cur);
-      if (next === cur) return path.resolve(p);
-      tail = path.join(path.basename(cur), tail);
-      cur = next;
-    }
-  }
 }
 
 export function mergeSettings(settingsPath, repoRoot) {
@@ -1137,43 +548,6 @@ export function cloneState(cloneDir) {
   return st.stdout.trim() === "" ? "ok" : "dirty";
 }
 
-// Is what install writes under the Claude config dir all present and current?
-// Read-only. `stale` when something install would write is missing or differs;
-// refused (user-owned) files and an unparseable settings.json are warnings only.
-export function claudeInstallStatus(root, claudeHome) {
-  const warnings = [];
-  try {
-    const agentsState = claudeAgentsInstallState(root, path.join(claudeHome, "agents"));
-    let stale = agentsState.state === STATE.STALE;
-    for (const d of agentsState.details) warnings.push(`claude: ${d}`);
-    for (const n of agentsState.refused) {
-      warnings.push(`claude agent ${n}: ${path.join(claudeHome, "agents", n + ".md")} exists and was not generated by skill-router`);
-    }
-    const rr = claudeReadRules(root);
-    const settingsFile = path.join(claudeHome, "settings.json");
-    if (rr.error) {
-      warnings.push(`claude: ${rr.error}`);
-    } else {
-      const rules = claudeRulesState(settingsFile, rr.rules);
-      if (rules === "missing-file") { stale = true; warnings.push(`claude: ${settingsFile} missing, allow rules not installed`); }
-      else if (rules === "unparseable") warnings.push(`claude: unparseable ${settingsFile}, allow rules not checked`);
-      else if (rules === "missing-rules") { stale = true; warnings.push("claude: allow rules missing"); }
-    }
-    const skillsDir = path.join(claudeHome, "skills");
-    const skills = claudeSkillsStatus(root, skillsDir);
-    if (skills.stale) { stale = true; warnings.push("claude: route-skill missing or stale"); }
-    for (const n of skills.refused) {
-      warnings.push(`claude skill ${n}: ${path.join(skillsDir, n, "SKILL.md")} exists and was not generated by skill-router`);
-    }
-    return { state: stale ? STATE.STALE : STATE.IN_SYNC, warnings };
-  } catch (e) {
-    warnings.push(`claude: status check skipped (${e.message})`);
-    return { state: STATE.STALE, warnings };
-  }
-}
-
-const STATE = { IN_SYNC: "in-sync", STALE: "stale", MISSING: "missing", NONE: "—", NA: "n/a", ERROR: "error" };
-
 // A generated file against what it should contain; `expected` is a thunk so the
 // (sometimes expensive) render only runs when the file exists.
 function fileState(file, expected) {
@@ -1409,79 +783,10 @@ function runFlow(root, mode, { settingsPath, vibeConfigPath, skillsHome, claudeH
   return { exitCode: anyFailed ? 1 : 0, report };
 }
 
-// Runs only when claudeHome is non-null; after prune() so a repo dropped from
-// the manifest is not re-installed. Refusals are warnings, never failures.
-function runClaudeInstall(root, claudeHome, report) {
-  if (!fs.existsSync(claudeHome)) {
-    report.push(`claude: skipped (${claudeHome} not found)`);
-    return;
-  }
-  const agentsDir = path.join(claudeHome, "agents");
-  const skillsDir = path.join(claudeHome, "skills");
-  const settingsFile = path.join(claudeHome, "settings.json");
-  report.push(`claude: using ${claudeHome}`);
-  const agentsExisted = fs.existsSync(agentsDir);
-  const skillsExisted = fs.existsSync(skillsDir);
-  // A filesystem error in one step (a file where a directory should be, a
-  // dangling link, no permission) must not discard the rest of the report.
-  const attempt = (label, fn) => {
-    try { return fn(); }
-    catch (e) { report.push(`claude: ${label} skipped (${e.message})`); return null; }
-  };
-  attempt("agents install", () => {
-    const r = installClaudeAgents(root, agentsDir);
-    report.push(r.installed.length
-      ? `claude: agents installed: ${r.installed.join(", ")}`
-      : "claude: agents already up to date");
-    for (const n of r.pruned) report.push(`claude: pruned agent ${n}`);
-    for (const n of r.refused) {
-      report.push(`claude: refused ${path.join(agentsDir, n + ".md")} (exists and was not generated by skill-router)`);
-    }
-    for (const x of r.invalid) report.push(`claude: invalid source ${x.name}: ${x.reason}`);
-    if (r.pruneSkipped) report.push("claude: prune skipped (agents-claude/ has no valid agents)");
-  });
-  attempt("allow rules", () => {
-    const rr = claudeReadRules(root);
-    if (rr.error) { report.push(`claude: allow rules skipped (${rr.error})`); return; }
-    const m = mergeClaudePermissions(settingsFile, rr.rules);
-    if (m.error) {
-      report.push(`claude: allow rules skipped (${m.error})`);
-      report.push(`claude: add manually to permissions.allow in ${settingsFile}: ${rr.rules.join(", ")}`);
-    } else {
-      report.push(m.changed
-        ? `claude: allow rules added (${m.added.length}) to ${settingsFile}`
-        : "claude: allow rules already configured");
-    }
-  });
-  attempt("skills sync", () => {
-    const r = syncClaudeSkills(root, skillsDir);
-    if (r.written.length) report.push(`claude: skills synced: ${r.written.join(", ")}`);
-    for (const n of r.refused) report.push(`claude: refused skill ${n} (existing file was not generated by skill-router)`);
-  });
-  // Decided from what is on disk afterwards, so a step that fails after creating
-  // the directory still gets its reminder.
-  if (!agentsExisted && fs.existsSync(agentsDir)) {
-    report.push(`reminder: restart Claude Code once so it discovers the new ${agentsDir} directory (later updates load live)`);
-  }
-  if (!skillsExisted && fs.existsSync(skillsDir)) {
-    report.push(`reminder: run /reload-skills in Claude Code (or restart) to pick up ${skillsDir}`);
-  }
-}
-
-// CLAUDE_CONFIG_DIR must be an absolute path to an existing directory; the
-// default dir need not exist (the install is skipped when it does not).
-export function resolveClaudeHome(env, home) {
-  const v = env.CLAUDE_CONFIG_DIR;
-  if (!v) return { dir: path.join(home, ".claude") };
-  if (!path.isAbsolute(v)) return { error: `CLAUDE_CONFIG_DIR must be an absolute path: ${v}` };
-  let st;
-  try { st = fs.statSync(v); } catch { return { error: `CLAUDE_CONFIG_DIR does not exist: ${v}` }; }
-  if (!st.isDirectory()) return { error: `CLAUDE_CONFIG_DIR is not a directory: ${v}` };
-  return { dir: v };
-}
-
 const DEFAULT_SETTINGS = () => path.join(os.homedir(), ".pi/agent/settings.json");
+
 const DEFAULT_VIBE_CONFIG = () => path.join(process.env.VIBE_HOME || path.join(os.homedir(), ".vibe"), "config.toml");
+
 // `paths` = { settingsPath, vibeConfigPath, skillsHome, claudeHome }. The first
 // two default to the real pi and Vibe config; `skillsHome` defaults to the pi
 // skills dir; `claudeHome` null/undefined skips the Claude install step
@@ -1491,7 +796,9 @@ function flowPaths(paths) {
     settingsPath: paths.settingsPath ?? DEFAULT_SETTINGS(),
     vibeConfigPath: paths.vibeConfigPath ?? DEFAULT_VIBE_CONFIG() };
 }
+
 export function runInstall(root, paths = {}) { return runFlow(root, "install", flowPaths(paths)); }
+
 export function runUpdate(root, paths = {}) { return runFlow(root, "update", flowPaths(paths)); }
 
 // The CLI as a function so it can be tested against a temp root and temp config
