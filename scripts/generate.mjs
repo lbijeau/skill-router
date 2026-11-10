@@ -1267,7 +1267,7 @@ export function printStatus(root, manifest, opts = {}) {
   return { output: lines.join("\n") + "\n", exitCode };
 }
 
-function runFlow(root, settingsPath, vibeConfigPath, mode, skillsHome, claudeHome) {
+function runFlow(root, mode, { settingsPath, vibeConfigPath, skillsHome, claudeHome }) {
   const manifest = loadManifest(root);
   const report = [];
   let anyFailed = false;
@@ -1482,14 +1482,17 @@ export function resolveClaudeHome(env, home) {
 
 const DEFAULT_SETTINGS = () => path.join(os.homedir(), ".pi/agent/settings.json");
 const DEFAULT_VIBE_CONFIG = () => path.join(process.env.VIBE_HOME || path.join(os.homedir(), ".vibe"), "config.toml");
-// claudeHome: null/undefined skips the Claude install step (generation of
-// agents-claude/ still runs). Only the CLI computes a default.
-export function runInstall(root, settingsPath, vibeConfigPath, skillsHome, claudeHome) {
-  return runFlow(root, settingsPath ?? DEFAULT_SETTINGS(), vibeConfigPath ?? DEFAULT_VIBE_CONFIG(), "install", skillsHome, claudeHome);
+// `paths` = { settingsPath, vibeConfigPath, skillsHome, claudeHome }. The first
+// two default to the real pi and Vibe config; `skillsHome` defaults to the pi
+// skills dir; `claudeHome` null/undefined skips the Claude install step
+// (generation of agents-claude/ still runs). Only the CLI computes a Claude default.
+function flowPaths(paths) {
+  return { ...paths,
+    settingsPath: paths.settingsPath ?? DEFAULT_SETTINGS(),
+    vibeConfigPath: paths.vibeConfigPath ?? DEFAULT_VIBE_CONFIG() };
 }
-export function runUpdate(root, settingsPath, vibeConfigPath, skillsHome, claudeHome) {
-  return runFlow(root, settingsPath ?? DEFAULT_SETTINGS(), vibeConfigPath ?? DEFAULT_VIBE_CONFIG(), "update", skillsHome, claudeHome);
-}
+export function runInstall(root, paths = {}) { return runFlow(root, "install", flowPaths(paths)); }
+export function runUpdate(root, paths = {}) { return runFlow(root, "update", flowPaths(paths)); }
 
 // The CLI as a function so it can be tested against a temp root and temp config
 // paths; `opts` = { root, home, settingsPath, vibeConfigPath, skillsHome }.
@@ -1513,7 +1516,8 @@ export function runCli(argv, env, opts = {}) {
     }
     if (cmd === "install" || cmd === "update") {
       const run = cmd === "install" ? runInstall : runUpdate;
-      const r = run(root, opts.settingsPath, opts.vibeConfigPath, opts.skillsHome, claudeHome);
+      const r = run(root, { settingsPath: opts.settingsPath, vibeConfigPath: opts.vibeConfigPath,
+        skillsHome: opts.skillsHome, claudeHome });
       if (noClaude) out.push("claude: skipped (--no-claude)");
       out.push(...r.report);
       if (claudeError) {

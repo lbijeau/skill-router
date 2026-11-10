@@ -513,7 +513,7 @@ test("install: clones, generates, prunes, merges settings; clone failure flagged
     { name: "b", url: "file://" + path.join(root, "nope.git"), description: "d", persona: "p" },
   ]}));
   w(root, "agents/orphan.md", "---\nname: orphan\nskillPath: ../skills/orphan\n---\nx\n");
-  const r = gen.runInstall(root, sp, path.join(root, "config.toml"));
+  const r = gen.runInstall(root, { settingsPath: sp, vibeConfigPath: path.join(root, "config.toml") });
   eq(r.exitCode, 1);                                    // entry b failed
   eq(fs.existsSync(path.join(root, "skills/a/skills/one/SKILL.md")), true);
   eq(fs.readFileSync(path.join(root, "agents/a.md"), "utf8"),
@@ -531,7 +531,7 @@ test("install: not-a-repo clone dir is removed and re-cloned", () => {
   w(root, "skills/a/junk.txt", "interrupted clone");
   w(root, "repos.json", JSON.stringify({ repos: [
     { name: "a", url: remote.url, description: "d", persona: "p" }]}));
-  const r = gen.runInstall(root, path.join(root, "settings.json"), path.join(root, "config.toml"));
+  const r = gen.runInstall(root, { settingsPath: path.join(root, "settings.json"), vibeConfigPath: path.join(root, "config.toml") });
   eq(r.exitCode, 0);
   eq(fs.existsSync(path.join(root, "skills/a/.git")), true);
   eq(fs.existsSync(path.join(root, "skills/a/junk.txt")), false);
@@ -544,9 +544,9 @@ test("update: pull --ff-only picks up new skills and reports deltas", () => {
   const remote = bareRemote(root); remote.add(path.join("skills", "one"), "one");
   w(root, "repos.json", JSON.stringify({ repos: [
     { name: "a", url: remote.url, description: "d", persona: "p" }]}));
-  eq(gen.runInstall(root, sp, vp).exitCode, 0);
+  eq(gen.runInstall(root, { settingsPath: sp, vibeConfigPath: vp }).exitCode, 0);
   remote.add(path.join("skills", "two"), "two");
-  const r = gen.runUpdate(root, sp, vp);
+  const r = gen.runUpdate(root, { settingsPath: sp, vibeConfigPath: vp });
   eq(r.exitCode, 0);
   eq(r.report.filter(l => /a: \+1 \(two\)/.test(l)).length, 1);
   eq(fs.readFileSync(path.join(root, "agents/a.md"), "utf8"),
@@ -559,11 +559,11 @@ test("update: non-ff remote is warned and left as-is, exit non-zero", () => {
   const remote = bareRemote(root); remote.add(path.join("skills", "one"), "one");
   w(root, "repos.json", JSON.stringify({ repos: [
     { name: "a", url: remote.url, description: "d", persona: "p" }]}));
-  eq(gen.runInstall(root, sp, path.join(root, "config.toml")).exitCode, 0);
+  eq(gen.runInstall(root, { settingsPath: sp, vibeConfigPath: path.join(root, "config.toml") }).exitCode, 0);
   // rewrite remote history: amend + force push makes local pull non-ff
   spawnSync("git", ["-C", path.join(root, "work"), "commit", "--amend", "-q", "-m", "rewritten"]);
   spawnSync("git", ["-C", path.join(root, "work"), "push", "-q", "-f", "origin", "HEAD"]);
-  const r = gen.runUpdate(root, sp, path.join(root, "config.toml"));
+  const r = gen.runUpdate(root, { settingsPath: sp, vibeConfigPath: path.join(root, "config.toml") });
   eq(r.exitCode, 1);
   eq(r.report.some(l => /pull failed/.test(l)), true);
   eq(fs.existsSync(path.join(root, "skills/a/.git")), true);   // clone untouched
@@ -575,9 +575,9 @@ test("install: reused clone reported dirty when locally modified", () => {
   remote.add(path.join("skills", "one"), "one");
   w(root, "repos.json", JSON.stringify({ repos: [
     { name: "a", url: remote.url, description: "d", persona: "p" }]}));
-  gen.runInstall(root, path.join(root, "settings.json"), path.join(root, "config.toml"));
+  gen.runInstall(root, { settingsPath: path.join(root, "settings.json"), vibeConfigPath: path.join(root, "config.toml") });
   w(root, "skills/a/local-change.txt", "x");
-  const r = gen.runInstall(root, path.join(root, "settings.json"), path.join(root, "config.toml"));
+  const r = gen.runInstall(root, { settingsPath: path.join(root, "settings.json"), vibeConfigPath: path.join(root, "config.toml") });
   eq(r.report.some(l => /reused \(dirty\)/.test(l)), true);
   eq(r.exitCode, 0);
   clean(root);
@@ -661,7 +661,7 @@ test("install: clone failure leaves pre-existing agent file untouched", () => {
     { name: "b", url: "file://" + path.join(root, "nope.git"), description: "d", persona: "p" },
   ]}));
   w(root, "agents/b.md", "previously generated agent");
-  const r = gen.runInstall(root, sp, path.join(root, "config.toml"));
+  const r = gen.runInstall(root, { settingsPath: sp, vibeConfigPath: path.join(root, "config.toml") });
   eq(r.exitCode, 1);
   eq(fs.readFileSync(path.join(root, "agents/b.md"), "utf8"), "previously generated agent");
   clean(root);
@@ -675,7 +675,7 @@ test("install: writes both targets, wires both settings", () => {
     { name: "a", url: remote.url, description: "d", persona: "p" },
     { name: "b", url: "file://" + path.join(root, "nope.git"), description: "d", persona: "p" },
   ]}));
-  const r = gen.runInstall(root, sp, vp);
+  const r = gen.runInstall(root, { settingsPath: sp, vibeConfigPath: vp });
   eq(r.exitCode, 1);                                    // entry b failed
   const found = gen.discoverSkills(path.join(root, "skills/a"), { name: "a", description: "d", persona: "p" });
   eq(fs.readFileSync(path.join(root, "agents-vibe/a.toml"), "utf8"),
@@ -695,7 +695,7 @@ test("install: clone failure leaves pre-existing vibe TOML untouched", () => {
     { name: "b", url: "file://" + path.join(root, "nope.git"), description: "d", persona: "p" },
   ]}));
   w(root, "agents-vibe/b.toml", "pre-existing");
-  const r = gen.runInstall(root, sp, path.join(root, "config.toml"));
+  const r = gen.runInstall(root, { settingsPath: sp, vibeConfigPath: path.join(root, "config.toml") });
   eq(r.exitCode, 1);
   eq(fs.readFileSync(path.join(root, "agents-vibe/b.toml"), "utf8"), "pre-existing");
   clean(root);
@@ -708,7 +708,7 @@ test("install: vibe config bail is report-only", () => {
   w(root, "repos.json", JSON.stringify({ repos: [
     { name: "a", url: remote.url, description: "d", persona: "p" }]}));
   w(root, "config.toml", 'agent_paths = [\n  "/other",\n]\n');
-  const r = gen.runInstall(root, sp, vp);
+  const r = gen.runInstall(root, { settingsPath: sp, vibeConfigPath: vp });
   eq(r.exitCode, 0);
   const skipped = r.report.filter(l => /vibe config: agent_paths skipped/.test(l));
   eq(skipped.length, 1);
@@ -722,7 +722,7 @@ test("install: report mentions both targets and prints reminders", () => {
   const remote = bareRemote(root); remote.add(path.join("skills", "one"), "one");
   w(root, "repos.json", JSON.stringify({ repos: [
     { name: "a", url: remote.url, description: "d", persona: "p" }]}));
-  const r = gen.runInstall(root, sp, vp);
+  const r = gen.runInstall(root, { settingsPath: sp, vibeConfigPath: vp });
   eq(r.exitCode, 0);
   eq(r.report.some(l => /a: cloned, 1 skills, agent written \(pi, vibe, claude\)/.test(l)), true);
   eq(r.report.some(l => /vibe config: agent_paths added/.test(l)), true);
@@ -788,7 +788,7 @@ test("install: unparseable settings reports only the skipped line", () => {
   w(root, "repos.json", JSON.stringify({ repos: [
     { name: "a", url: remote.url, description: "d", persona: "p" }]}));
   w(root, "settings.json", "{ not json");
-  const r = gen.runInstall(root, sp, path.join(root, "config.toml"));
+  const r = gen.runInstall(root, { settingsPath: sp, vibeConfigPath: path.join(root, "config.toml") });
   eq(r.exitCode, 0);
   eq(r.report.filter(l => l.startsWith("settings:")).length, 1);
   eq(/skipped/.test(r.report.find(l => l.startsWith("settings:"))), true);
@@ -834,12 +834,12 @@ test("update: changed manifest url re-clones from the new remote", () => {
   const rb = bareRemote(tmp()); rb.add(path.join("skills", "two"), "two");
   w(root, "repos.json", JSON.stringify({ repos: [
     { name: "a", url: ra.url, description: "d", persona: "p" }]}));
-  eq(gen.runInstall(root, sp, path.join(root, "config.toml")).exitCode, 0);
+  eq(gen.runInstall(root, { settingsPath: sp, vibeConfigPath: path.join(root, "config.toml") }).exitCode, 0);
   eq(fs.readFileSync(path.join(root, "agents/a.md"), "utf8"),
      gen.renderAgentFile({ name: "a", description: "d", persona: "p" }, ["one"]));
   w(root, "repos.json", JSON.stringify({ repos: [
     { name: "a", url: rb.url, description: "d", persona: "p" }]}));
-  const r = gen.runUpdate(root, sp, path.join(root, "config.toml"));
+  const r = gen.runUpdate(root, { settingsPath: sp, vibeConfigPath: path.join(root, "config.toml") });
   eq(r.exitCode, 0);
   eq(r.report.some(l => /url changed/.test(l)), true);
   eq(fs.readFileSync(path.join(root, "agents/a.md"), "utf8"),
@@ -1377,7 +1377,7 @@ test("runFlow: skillsHome is injectable, global skill synced there", () => {
   skill(root, "skills/one/a");
   gitRepo(path.join(root, "skills/one"));
   w(root, "global-skills/route-skill/SKILL.md", "---\nname: route-skill\ndescription: d\n---\nbody\n");
-  const r = gen.runInstall(root, path.join(settings, "settings.json"), path.join(settings, "config.toml"), skillsHome);
+  const r = gen.runInstall(root, { settingsPath: path.join(settings, "settings.json"), vibeConfigPath: path.join(settings, "config.toml"), skillsHome: skillsHome });
   eq(r.exitCode, 0);
   eq(fs.existsSync(path.join(skillsHome, "route-skill", "SKILL.md")), true);
   eq(fs.existsSync(path.join(os.homedir(), ".pi/agent/skills/route-skill-test-never")), false);
@@ -1837,7 +1837,7 @@ test("syncClaudeSkills: writes route-skill; refuses unmarked file and symlinked 
 
 test("install: route-skill for claude lands in the claude skills dir and never in the pi skills home", () => {
   const f = claudeFixture({ claudeAgentsDir: true }); const pi = path.join(f.root, "pi-skills");
-  const r = gen.runInstall(f.root, f.sp, f.vp, pi, f.claude);
+  const r = gen.runInstall(f.root, { settingsPath: f.sp, vibeConfigPath: f.vp, skillsHome: pi, claudeHome: f.claude });
   eq(r.exitCode, 0);
   eq(fs.existsSync(path.join(f.claude, "skills/route-skill/SKILL.md")), true);
   eq(fs.existsSync(pi) ? fs.readdirSync(pi).length : 0, 0);
@@ -1870,7 +1870,7 @@ const lineOf = (report, re) => report.find(l => re.test(l));
 
 test("install: generates agents-claude, installs into an existing claude home, adds rules, syncs route-skill", () => {
   const f = claudeFixture({ names: ["a"], claudeAgentsDir: true });
-  const r = gen.runInstall(f.root, f.sp, f.vp, undefined, f.claude);
+  const r = gen.runInstall(f.root, { settingsPath: f.sp, vibeConfigPath: f.vp, claudeHome: f.claude });
   eq(r.exitCode, 0);
   eq(gen.isOwnedClaudeAgent(path.join(f.root, "agents-claude/a.md")), true);
   eq(gen.isOwnedClaudeAgent(path.join(f.claude, "agents/a.md")), true);
@@ -1886,12 +1886,12 @@ test("install: generates agents-claude, installs into an existing claude home, a
 
 test("install: a repo removed from the manifest is gone from claude agents after one run", () => {
   const f = claudeFixture({ names: ["a", "b"], claudeAgentsDir: true });
-  gen.runInstall(f.root, f.sp, f.vp, undefined, f.claude);
+  gen.runInstall(f.root, { settingsPath: f.sp, vibeConfigPath: f.vp, claudeHome: f.claude });
   eq(fs.existsSync(path.join(f.claude, "agents/b.md")), true);
   const m = JSON.parse(fs.readFileSync(path.join(f.root, "repos.json"), "utf8"));
   m.repos = m.repos.filter(x => x.name === "a");
   w(f.root, "repos.json", JSON.stringify(m));
-  gen.runInstall(f.root, f.sp, f.vp, undefined, f.claude);
+  gen.runInstall(f.root, { settingsPath: f.sp, vibeConfigPath: f.vp, claudeHome: f.claude });
   eq(fs.existsSync(path.join(f.claude, "agents/b.md")), false);
   eq(fs.existsSync(path.join(f.root, "agents-claude/b.md")), false);
   eq(fs.existsSync(path.join(f.claude, "agents/a.md")), true);
@@ -1901,7 +1901,7 @@ test("install: a repo removed from the manifest is gone from claude agents after
 test("install: claude home absent is skipped with one note, exit 0, directory not created", () => {
   const f = claudeFixture();
   const missing = path.join(f.claude, "nope");
-  const r = gen.runInstall(f.root, f.sp, f.vp, undefined, missing);
+  const r = gen.runInstall(f.root, { settingsPath: f.sp, vibeConfigPath: f.vp, claudeHome: missing });
   eq(r.exitCode, 0);
   eq(fs.existsSync(missing), false);
   eq(r.report.filter(l => /^claude: skipped/.test(l)).length, 1);
@@ -1915,8 +1915,8 @@ test("install: claudeHome undefined or null writes nothing under HOME and prints
   try {
     for (const arg of [undefined, null]) {
       const f = claudeFixture();
-      const r = arg === undefined ? gen.runInstall(f.root, f.sp, f.vp, path.join(f.root, "pi-skills"))
-        : gen.runInstall(f.root, f.sp, f.vp, path.join(f.root, "pi-skills"), null);
+      const r = arg === undefined ? gen.runInstall(f.root, { settingsPath: f.sp, vibeConfigPath: f.vp, skillsHome: path.join(f.root, "pi-skills") })
+        : gen.runInstall(f.root, { settingsPath: f.sp, vibeConfigPath: f.vp, skillsHome: path.join(f.root, "pi-skills"), claudeHome: null });
       eq(r.report.some(l => /^claude:/.test(l)), false);
       eq(fs.readdirSync(path.join(home, ".claude/agents")).length, 0);
       eq(fs.existsSync(path.join(home, ".claude/settings.json")), false);
@@ -1928,10 +1928,10 @@ test("install: claudeHome undefined or null writes nothing under HOME and prints
 
 test("install: restart reminder only when agents dir created; /reload-skills only when skills dir created", () => {
   const f = claudeFixture();
-  const r1 = gen.runInstall(f.root, f.sp, f.vp, undefined, f.claude);
+  const r1 = gen.runInstall(f.root, { settingsPath: f.sp, vibeConfigPath: f.vp, claudeHome: f.claude });
   eq(Boolean(lineOf(r1.report, /^reminder: .*restart Claude Code/)), true);
   eq(Boolean(lineOf(r1.report, /^reminder: .*\/reload-skills/)), true);
-  const r2 = gen.runInstall(f.root, f.sp, f.vp, undefined, f.claude);
+  const r2 = gen.runInstall(f.root, { settingsPath: f.sp, vibeConfigPath: f.vp, claudeHome: f.claude });
   eq(Boolean(lineOf(r2.report, /restart Claude Code/)), false);
   eq(Boolean(lineOf(r2.report, /\/reload-skills/)), false);
   clean(f.root); clean(f.claude);
@@ -1940,7 +1940,7 @@ test("install: restart reminder only when agents dir created; /reload-skills onl
 test("install: unmarked same-name claude agent is refused and reported, exit unaffected", () => {
   const f = claudeFixture({ claudeAgentsDir: true });
   w(f.claude, "agents/a.md", "mine\n");
-  const r = gen.runInstall(f.root, f.sp, f.vp, undefined, f.claude);
+  const r = gen.runInstall(f.root, { settingsPath: f.sp, vibeConfigPath: f.vp, claudeHome: f.claude });
   eq(r.exitCode, 0);
   eq(fs.readFileSync(path.join(f.claude, "agents/a.md"), "utf8"), "mine\n");
   eq(Boolean(lineOf(r.report, /^claude: refused .*a\.md/)), true);
@@ -1950,7 +1950,7 @@ test("install: unmarked same-name claude agent is refused and reported, exit una
 test("install: unparseable claude settings prints the exact remedy with both rules", () => {
   const f = claudeFixture({ claudeAgentsDir: true });
   w(f.claude, "settings.json", "{ nope");
-  const r = gen.runInstall(f.root, f.sp, f.vp, undefined, f.claude);
+  const r = gen.runInstall(f.root, { settingsPath: f.sp, vibeConfigPath: f.vp, claudeHome: f.claude });
   eq(r.exitCode, 0);
   eq(fs.readFileSync(path.join(f.claude, "settings.json"), "utf8"), "{ nope");
   eq(Boolean(lineOf(r.report, /^claude: allow rules skipped \(.*unparseable/)), true);
@@ -2055,7 +2055,7 @@ test("install: filesystem errors in the claude block are reported, never thrown 
     const f = claudeFixture();
     setup(f);
     let r;
-    try { r = gen.runInstall(f.root, f.sp, f.vp, undefined, f.claude); }
+    try { r = gen.runInstall(f.root, { settingsPath: f.sp, vibeConfigPath: f.vp, claudeHome: f.claude }); }
     catch (e) { assert.fail(`${name}: install threw ${e.message}`); }
     eq(r.exitCode, 0, name);
     const expect = name.startsWith("route-skill") ? /^claude: refused skill route-skill/ : /^claude: .*skipped \(/;
