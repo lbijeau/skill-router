@@ -825,8 +825,10 @@ export function runCli(argv, env, opts = {}) {
       return { exitCode: st.exitCode, out, err };
     }
     if (cmd === "install" || cmd === "update") {
-      if (opts.root && !(opts.settingsPath && opts.vibeConfigPath && opts.skillsHome)) {
-        err.push("runCli: a custom root needs explicit settingsPath, vibeConfigPath and skillsHome (it would otherwise write the real pi and Vibe config)");
+      // A custom root (tests) must not fall back to the real pi, Vibe or Claude config.
+      const claudeTargetKnown = Boolean(opts.home) || noClaude || Boolean(env.CLAUDE_CONFIG_DIR);
+      if (opts.root && !(opts.settingsPath && opts.vibeConfigPath && opts.skillsHome && claudeTargetKnown)) {
+        err.push("runCli: a custom root needs explicit settingsPath, vibeConfigPath and skillsHome, and a home, CLAUDE_CONFIG_DIR or --no-claude (it would otherwise write the real pi, Vibe and Claude config)");
         return { exitCode: 1, out, err };
       }
       const run = cmd === "install" ? runInstall : runUpdate;

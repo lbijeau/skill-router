@@ -222,6 +222,16 @@ this checkout from `permissions.allow` in `~/.claude/settings.json`, and delete
 
 Known work left over from the Claude Code target, none of it blocking.
 
+**Review leftovers (from PR D)**
+- `flowPaths` rejects `null` and non-objects but lets an array through
+  (`runInstall(root, [])` falls back to the real pi and Vibe config).
+- The export-list test checks that a name is present, not that it is the same
+  binding, so a local export that shadows a star-exported one would pass.
+- `claudeReadRules(root, null)` throws (its default covers only `undefined`),
+  unlike `hasClaudeReadRules` and `mergeClaudePermissions`.
+- The `runCli` guard test covers `install` only (`update` shares the branch), and
+  the TypeError test leaves six temp directories behind.
+
 **Naming**
 - `writeClaudeRouterAgent` is a thin wrapper kept for symmetry with
   `writeRouterAgent`.

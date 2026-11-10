@@ -2479,6 +2479,52 @@ test("install: the pi skills home is pre-created and stays empty after a claude 
   clean(f.root); clean(f.claude);
 });
 
+test("runClaudeInstall: a dir left empty by a failed first run still gets its reminder when a later run fills it", () => {
+  const t = reminderFixture();
+  t.run({ installClaudeAgents: (root, dir) => { fs.mkdirSync(dir); throw new Error("ENOSPC"); } });
+  eq(t.has(/restart Claude Code/), false);                                 // nothing to discover yet
+  claudeSrc(t.f.root, ["a"]);                                               // a valid source appears
+  const second = [];
+  gen.runClaudeInstall(t.f.root, t.f.claude, second);                       // real install fills it
+  eq(second.some(l => /agents installed/.test(l)), true);
+  eq(second.some(l => /restart Claude Code/.test(l)), true);
+  const third = [];
+  gen.runClaudeInstall(t.f.root, t.f.claude, third);                        // nothing new now
+  eq(third.some(l => /restart Claude Code/.test(l)), false);
+  clean(t.f.root); clean(t.f.claude);
+});
+
+test("runClaudeInstall: an unreadable agents path after a failed step does not throw out of the report", () => {
+  const t = reminderFixture();
+  let threw = false;
+  try { t.run({ installClaudeAgents: (root, dir) => { fs.writeFileSync(dir, "a file, not a dir"); throw new Error("boom"); } }); }
+  catch { threw = true; }
+  eq(threw, false);
+  eq(t.has(/restart Claude Code/), false);
+  clean(t.f.root); clean(t.f.claude);
+});
+
+test("runCli: a custom root needs a home, CLAUDE_CONFIG_DIR or --no-claude as well as the config paths", () => {
+  const f = claudeFixture(); const cfg = tmp(); const fakeHome = tmp();
+  fs.mkdirSync(path.join(fakeHome, ".claude/agents"), { recursive: true });
+  const paths = { root: f.root, settingsPath: f.sp, vibeConfigPath: f.vp, skillsHome: path.join(f.root, "pi-skills") };
+  // HOME is a temp dir for the whole test, so even an unguarded fallback to <home>/.claude can never reach the real one.
+  const saved = process.env.HOME; process.env.HOME = fakeHome;
+  try {
+    const bad = gen.runCli(["install"], {}, paths);                         // would fall back to <home>/.claude
+    eq(bad.exitCode, 1);
+    eq(bad.err.some(l => /home, CLAUDE_CONFIG_DIR or --no-claude/.test(l)), true);
+    eq(fs.existsSync(path.join(f.root, "agents")), false);
+    eq(fs.readdirSync(path.join(fakeHome, ".claude/agents")).length, 0);
+    const noClaude = gen.runCli(["install", "--no-claude"], {}, paths);
+    eq(noClaude.exitCode, 0);
+    const viaEnv = gen.runCli(["install"], { CLAUDE_CONFIG_DIR: cfg }, paths);
+    eq(viaEnv.exitCode, 0);
+    eq(fs.existsSync(path.join(cfg, "agents/a.md")), true);
+  } finally { process.env.HOME = saved; }
+  clean(f.root); clean(f.claude); clean(cfg); clean(fakeHome);
+});
+
 process.exitCode = await (async () => {
   let failed = 0;
   for (const t of tests) {
