@@ -724,7 +724,7 @@ test("install: report mentions both targets and prints reminders", () => {
     { name: "a", url: remote.url, description: "d", persona: "p" }]}));
   const r = gen.runInstall(root, sp, vp);
   eq(r.exitCode, 0);
-  eq(r.report.some(l => /a: cloned, 1 skills, agent written \(pi, vibe\)/.test(l)), true);
+  eq(r.report.some(l => /a: cloned, 1 skills, agent written \(pi, vibe, claude\)/.test(l)), true);
   eq(r.report.some(l => /vibe config: agent_paths added/.test(l)), true);
   eq(r.report.some(l => /vibe config: allowlist added/.test(l)), true);
   eq(r.report.includes("reminder: run /reload (or restart Vibe) to pick up new agents"), true);
@@ -1879,7 +1879,7 @@ test("install: generates agents-claude, installs into an existing claude home, a
   eq(Boolean(lineOf(r.report, /^claude: agents installed: .*\ba\b/)), true);
   eq(Boolean(lineOf(r.report, /^claude: allow rules added/)), true);
   eq(Boolean(lineOf(r.report, /^claude: skills synced: route-skill/)), true);
-  eq(Boolean(lineOf(r.report, /^a: cloned, 1 skills, agent written \(pi, vibe\)$/)), true);   // claude is not appended here
+  eq(Boolean(lineOf(r.report, /^a: cloned, 1 skills, agent written \(pi, vibe, claude\)$/)), true);
   clean(f.root); clean(f.claude);
 });
 
@@ -2190,6 +2190,24 @@ test("syncClaudeSkills: a user file that only mentions the marker phrase is refu
   eq(r2.written.join(), "route-skill");
   eq(fs.readFileSync(path.join(home, "route-skill/SKILL.md"), "utf8"), src);
   clean(root); clean(path.dirname(home));
+});
+
+// ---- Follow-ups A ----
+test("syncClaudeSkills: no sources means no directory created and dirCreated false", () => {
+  const root = tmp(), home = path.join(tmp(), "skills");
+  const r = gen.syncClaudeSkills(root, home);
+  eq(r.dirCreated, false);
+  eq(fs.existsSync(home), false);
+  clean(root); clean(path.dirname(home));
+});
+
+test("syncClaudeSkills: only refused skills means dirCreated false for an existing dir and true only when it created one", () => {
+  const root = tmp(), base = tmp(), home = path.join(base, "skills");
+  w(root, "global-skills-claude/route-skill/SKILL.md", "---\nname: route-skill\n---\n\n" + gen.GLOBAL_SKILL_HEADER + " -->\n");
+  eq(gen.syncClaudeSkills(root, home).dirCreated, true);                  // created it
+  fs.writeFileSync(path.join(home, "route-skill/SKILL.md"), "mine\n");
+  eq(gen.syncClaudeSkills(root, home).dirCreated, false);                 // existed, refused
+  clean(root); clean(base);
 });
 
 process.exitCode = await (async () => {
