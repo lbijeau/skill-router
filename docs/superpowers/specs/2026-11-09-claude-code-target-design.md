@@ -196,6 +196,28 @@ above that conflicts:
 - **Deferred or documented only:** uninstall helper, checkout path in the
   marker, two checkouts pruning each other's agents (documented).
 
+## Decisions after the PR #4 review (2026-11-10)
+
+Made while triaging the follow-ups; they override anything above that
+conflicts.
+
+- **`route-skill` offers, it does not auto-follow.** The Claude `route-skill`
+  relays the router's recommendation and offers to read and follow the skill;
+  it starts nothing until the user says so. This matches the pi version and
+  replaces "then the main session reads the recommended `SKILL.md` and follows
+  it".
+- **Reserved agent names are skipped.** A manifest entry whose name is
+  `general-purpose`, `explore`, `plan` or `skill-router` (compared
+  case-insensitively) gets no Claude agent and a warning, because it would
+  shadow a built-in agent or the router. This replaces "use the manifest names
+  unchanged" for those names only.
+- **Empty or blank descriptions are skipped** with a warning, and an owned
+  leftover file for such an entry is removed (never the router).
+- **Prune skip condition** is "the source has no valid agents", not "no owned
+  files".
+- **`--no-claude` is not sticky.** A persistent opt-out would need a config
+  file; passing the flag again on `status` is the documented behaviour.
+
 ## Left to the builder
 
 - Exact YAML escaping for descriptions; how to share boilerplate with the
