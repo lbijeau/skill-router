@@ -597,6 +597,100 @@ function atomicWrite(file, content) {
   fs.renameSync(tmpf, file);
 }
 
+// Frontmatter-level checks on a committed agents-claude/ file before it may be
+// installed. A file missing its `tools:` line would inherit every tool, so a
+// truncated or hand-edited source must never reach ~/.claude/agents.
+export function validateClaudeAgentSource(content, stem) {
+  if (!NAME_RE.test(stem)) return "invalid agent name";
+  const lines = content.split("\n");
+  if (lines[0] !== "---") return "no frontmatter";
+  const end = lines.indexOf("---", 1);
+  if (end < 0) return "unclosed frontmatter";
+  const fm = lines.slice(1, end);
+  if (!fm.includes(`name: ${stem}`)) return "name does not match file name";
+  const toolLines = fm.filter(l => /^tools\s*:/.test(l));
+  if (toolLines.length !== 1 || toolLines[0] !== CLAUDE_TOOLS_LINE) return "tools line missing, duplicated or different";
+  while (lines.length && lines[lines.length - 1] === "") lines.pop();
+  if (lines[lines.length - 1] !== CLAUDE_MARKER) return "missing ownership marker";
+  return null;
+}
+
+function readClaudeSources(root) {
+  const dir = path.join(root, "agents-claude");
+  let names;
+  try { names = fs.readdirSync(dir).filter(f => f.endsWith(".md")).sort(); }
+  catch { return []; }
+  const out = [];
+  for (const f of names) {
+    const file = path.join(dir, f);
+    let st;
+    try { st = fs.lstatSync(file); } catch { continue; }
+    if (!st.isFile()) continue;
+    const stem = f.replace(/\.md$/, "");
+    const content = fs.readFileSync(file, "utf8");
+    out.push({ stem, content, error: validateClaudeAgentSource(content, stem) });
+  }
+  return out;
+}
+
+// Contract: creates agentsDir (mkdir -p); the caller guarantees the Claude
+// home exists. Only ever writes, overwrites or deletes owned regular files.
+export function installClaudeAgents(root, agentsDir) {
+  const installed = [], pruned = [], refused = [], invalid = [];
+  const sources = readClaudeSources(root);
+  const dirCreated = !fs.existsSync(agentsDir);
+  fs.mkdirSync(agentsDir, { recursive: true });
+  for (const src of sources) {
+    if (src.error) { invalid.push({ name: src.stem, reason: src.error }); continue; }
+    const dest = path.join(agentsDir, `${src.stem}.md`);
+    if (fs.existsSync(dest) || isSymlink(dest)) {
+      if (!isOwnedClaudeAgent(dest)) { refused.push(src.stem); continue; }
+      if (fs.readFileSync(dest, "utf8") === src.content) continue;
+    }
+    atomicWrite(dest, src.content);
+    installed.push(src.stem);
+  }
+  const known = new Set(sources.map(x => x.stem));
+  const pruneSkipped = !sources.some(x => !x.error);
+  if (!pruneSkipped) {
+    for (const f of fs.readdirSync(agentsDir)) {
+      const m = f.match(/^(.*)\.md$/);
+      if (m && !known.has(m[1]) && isOwnedClaudeAgent(path.join(agentsDir, f))) {
+        fs.rmSync(path.join(agentsDir, f));
+        pruned.push(m[1]);
+      }
+    }
+  }
+  return { installed, pruned, refused, invalid, pruneSkipped, dirCreated };
+}
+
+function isSymlink(p) {
+  try { return fs.lstatSync(p).isSymbolicLink(); } catch { return false; }
+}
+
+// Read-only: installed copies versus the committed agents-claude/ files.
+export function claudeAgentsInstallState(root, agentsDir) {
+  const details = [], refused = [];
+  const sources = readClaudeSources(root);
+  const valid = sources.filter(x => !x.error);
+  if (!fs.existsSync(agentsDir)) {
+    if (valid.length) details.push(`${agentsDir} missing`);
+    return { state: details.length ? "stale" : "in-sync", refused, details };
+  }
+  for (const src of valid) {
+    const dest = path.join(agentsDir, `${src.stem}.md`);
+    if (!fs.existsSync(dest) && !isSymlink(dest)) { details.push(`${src.stem}: not installed`); continue; }
+    if (!isOwnedClaudeAgent(dest)) { refused.push(src.stem); continue; }
+    if (fs.readFileSync(dest, "utf8") !== src.content) details.push(`${src.stem}: installed copy differs`);
+  }
+  const known = new Set(sources.map(x => x.stem));
+  for (const f of fs.readdirSync(agentsDir)) {
+    const m = f.match(/^(.*)\.md$/);
+    if (m && !known.has(m[1]) && isOwnedClaudeAgent(path.join(agentsDir, f))) details.push(`${m[1]}: orphan`);
+  }
+  return { state: details.length ? "stale" : "in-sync", refused, details };
+}
+
 function realPath(p) {
   let cur = p;
   let tail = "";

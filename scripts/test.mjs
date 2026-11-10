@@ -1551,6 +1551,149 @@ test("discoverSkills: symlinked SKILL.md is skipped with a warning", () => {
   clean(root);
 });
 
+// ---- Claude Code target: Task 2 ----
+function claudeSrc(root, names) {
+  for (const n of names) w(root, `agents-claude/${n}.md`, gen.renderClaudeAgentFile(CE({ name: n }), CS, { home: "/x" }));
+}
+const tmpFiles = dir => fs.readdirSync(dir).filter(f => f.includes(".tmp-"));
+
+test("validateClaudeAgentSource: accepts generated; rejects missing tools, extra tools line, wrong name, no marker", () => {
+  const good = gen.renderClaudeAgentFile(CE(), CS, { home: "/x" });
+  eq(gen.validateClaudeAgentSource(good, "a"), null);
+  eq(typeof gen.validateClaudeAgentSource(good.replace("tools: Read, Grep, Glob\n", ""), "a"), "string");
+  eq(typeof gen.validateClaudeAgentSource(good.replace("omitClaudeMd: true", "tools: Read, Bash\nomitClaudeMd: true"), "a"), "string");
+  eq(typeof gen.validateClaudeAgentSource(good, "b"), "string");
+  eq(typeof gen.validateClaudeAgentSource(good.replace(gen.CLAUDE_MARKER, ""), "a"), "string");
+  eq(typeof gen.validateClaudeAgentSource(good, "Bad_Name"), "string");
+});
+
+test("installClaudeAgents: installs valid files; second run installs nothing; no tmp files left", () => {
+  const root = tmp(), dest = path.join(tmp(), "agents");
+  claudeSrc(root, ["a", "b"]);
+  const r1 = gen.installClaudeAgents(root, dest);
+  eq(r1.installed.join(), "a,b");
+  eq(fs.readFileSync(path.join(dest, "a.md"), "utf8"), fs.readFileSync(path.join(root, "agents-claude/a.md"), "utf8"));
+  const r2 = gen.installClaudeAgents(root, dest);
+  eq(r2.installed.length, 0);
+  eq(tmpFiles(dest).length, 0);
+  clean(root); clean(path.dirname(dest));
+});
+
+test("installClaudeAgents: unmarked same-name file refused, bytes unchanged", () => {
+  const root = tmp(), dest = path.join(tmp(), "agents");
+  claudeSrc(root, ["a"]);
+  w(path.dirname(dest), "agents/a.md", "mine\n");
+  const r = gen.installClaudeAgents(root, dest);
+  eq(r.refused.join(), "a");
+  eq(r.installed.length, 0);
+  eq(fs.readFileSync(path.join(dest, "a.md"), "utf8"), "mine\n");
+  clean(root); clean(path.dirname(dest));
+});
+
+test("installClaudeAgents: file quoting the marker mid-file is refused", () => {
+  const root = tmp(), dest = path.join(tmp(), "agents");
+  claudeSrc(root, ["a"]);
+  const body = "---\nname: a\n---\nI copy " + gen.CLAUDE_MARKER + " here\nmore\n";
+  w(path.dirname(dest), "agents/a.md", body);
+  const r = gen.installClaudeAgents(root, dest);
+  eq(r.refused.join(), "a");
+  eq(fs.readFileSync(path.join(dest, "a.md"), "utf8"), body);
+  clean(root); clean(path.dirname(dest));
+});
+
+test("installClaudeAgents: symlinked destination (owned target) is refused and target untouched", () => {
+  const root = tmp(), base = tmp(), dest = path.join(base, "agents");
+  claudeSrc(root, ["a"]);
+  const owned = gen.renderClaudeAgentFile(CE(), CS, { home: "/other" });   // different bytes, owned content
+  w(base, "dotfiles/a.md", owned);
+  fs.mkdirSync(dest, { recursive: true });
+  fs.symlinkSync(path.join(base, "dotfiles/a.md"), path.join(dest, "a.md"));
+  const r = gen.installClaudeAgents(root, dest);
+  eq(r.refused.join(), "a");
+  eq(fs.lstatSync(path.join(dest, "a.md")).isSymbolicLink(), true);
+  eq(fs.readFileSync(path.join(base, "dotfiles/a.md"), "utf8"), owned);
+  clean(root); clean(base);
+});
+
+test("installClaudeAgents: invalid sources are reported and not installed", () => {
+  const root = tmp(), dest = path.join(tmp(), "agents");
+  claudeSrc(root, ["a", "b"]);
+  w(root, "agents-claude/b.md", fs.readFileSync(path.join(root, "agents-claude/b.md"), "utf8").replace("tools: Read, Grep, Glob\n", ""));
+  const r = gen.installClaudeAgents(root, dest);
+  eq(r.installed.join(), "a");
+  eq(r.invalid.map(x => x.name).join(), "b");
+  eq(fs.existsSync(path.join(dest, "b.md")), false);
+  clean(root); clean(path.dirname(dest));
+});
+
+test("installClaudeAgents: owned file whose source is gone is pruned; unowned orphan kept", () => {
+  const root = tmp(), dest = path.join(tmp(), "agents");
+  claudeSrc(root, ["a", "gone"]);
+  gen.installClaudeAgents(root, dest);
+  fs.rmSync(path.join(root, "agents-claude/gone.md"));
+  w(path.dirname(dest), "agents/hand.md", "hand\n");
+  const r = gen.installClaudeAgents(root, dest);
+  eq(r.pruned.join(), "gone");
+  eq(fs.existsSync(path.join(dest, "gone.md")), false);
+  eq(fs.existsSync(path.join(dest, "hand.md")), true);
+  clean(root); clean(path.dirname(dest));
+});
+
+test("installClaudeAgents: empty or absent source prunes nothing and sets pruneSkipped", () => {
+  const root = tmp(), dest = path.join(tmp(), "agents");
+  claudeSrc(root, ["a"]);
+  gen.installClaudeAgents(root, dest);
+  fs.rmSync(path.join(root, "agents-claude"), { recursive: true });
+  const r = gen.installClaudeAgents(root, dest);
+  eq(r.pruneSkipped, true);
+  eq(r.pruned.length, 0);
+  eq(fs.existsSync(path.join(dest, "a.md")), true);
+  clean(root); clean(path.dirname(dest));
+});
+
+test("installClaudeAgents: stale owned file is overwritten", () => {
+  const root = tmp(), dest = path.join(tmp(), "agents");
+  claudeSrc(root, ["a"]);
+  gen.installClaudeAgents(root, dest);
+  w(root, "agents-claude/a.md", gen.renderClaudeAgentFile(CE({ persona: "new persona" }), CS, { home: "/x" }));
+  const r = gen.installClaudeAgents(root, dest);
+  eq(r.installed.join(), "a");
+  eq(fs.readFileSync(path.join(dest, "a.md"), "utf8").includes("new persona"), true);
+  eq(tmpFiles(dest).length, 0);
+  clean(root); clean(path.dirname(dest));
+});
+
+test("installClaudeAgents: dirCreated only when the agents dir did not exist", () => {
+  const root = tmp(), dest = path.join(tmp(), "agents");
+  claudeSrc(root, ["a"]);
+  eq(gen.installClaudeAgents(root, dest).dirCreated, true);
+  eq(gen.installClaudeAgents(root, dest).dirCreated, false);
+  clean(root); clean(path.dirname(dest));
+});
+
+test("claudeAgentsInstallState: in-sync, then stale for missing dir/file, differing file, owned orphan; refused is not stale", () => {
+  const root = tmp(), dest = path.join(tmp(), "agents");
+  claudeSrc(root, ["a", "b"]);
+  eq(gen.claudeAgentsInstallState(root, dest).state, "stale");              // dir missing
+  gen.installClaudeAgents(root, dest);
+  eq(gen.claudeAgentsInstallState(root, dest).state, "in-sync");
+  fs.rmSync(path.join(dest, "b.md"));
+  eq(gen.claudeAgentsInstallState(root, dest).state, "stale");              // missing file
+  gen.installClaudeAgents(root, dest);
+  fs.appendFileSync(path.join(dest, "a.md"), "\n");
+  eq(gen.claudeAgentsInstallState(root, dest).state, "stale");              // differing
+  gen.installClaudeAgents(root, dest);
+  fs.rmSync(path.join(root, "agents-claude/b.md"));
+  eq(gen.claudeAgentsInstallState(root, dest).state, "stale");              // owned orphan
+  gen.installClaudeAgents(root, dest);
+  eq(gen.claudeAgentsInstallState(root, dest).state, "in-sync");
+  fs.rmSync(path.join(dest, "a.md")); w(path.dirname(dest), "agents/a.md", "mine\n");
+  const st = gen.claudeAgentsInstallState(root, dest);
+  eq(st.state, "in-sync");
+  eq(st.refused.join(), "a");
+  clean(root); clean(path.dirname(dest));
+});
+
 process.exitCode = await (async () => {
   let failed = 0;
   for (const t of tests) {
