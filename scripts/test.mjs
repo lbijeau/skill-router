@@ -2286,6 +2286,71 @@ test("renderClaudeAgentFile: a NEL in a third-party skill description cannot rea
   clean(root);
 });
 
+// ---- CLI ----
+test("runCli: status --no-claude skips the claude install and wins over a bad CLAUDE_CONFIG_DIR", () => {
+  const { root } = statusFixture(); const home = tmp();
+  const r = gen.runCli(["status", "--no-claude"], { CLAUDE_CONFIG_DIR: "rel" }, { root, home });
+  eq(r.exitCode, 0);
+  eq(r.out.join("\n").includes("claude install: n/a"), true);
+  clean(root); clean(home);
+});
+
+test("runCli: status with a bad CLAUDE_CONFIG_DIR exits 1 and shows the error", () => {
+  const { root } = statusFixture(); const home = tmp();
+  const r = gen.runCli(["status"], { CLAUDE_CONFIG_DIR: "rel/dir" }, { root, home });
+  eq(r.exitCode, 1);
+  const out = r.out.join("\n");
+  eq(out.includes("claude install: error"), true);
+  eq(out.includes("CLAUDE_CONFIG_DIR must be an absolute path"), true);
+  clean(root); clean(home);
+});
+
+test("runCli: status honours a valid CLAUDE_CONFIG_DIR", () => {
+  const { root } = statusFixture(); const home = tmp(); const cfg = tmp();
+  const r = gen.runCli(["status"], { CLAUDE_CONFIG_DIR: cfg }, { root, home });
+  eq(r.out.join("\n").includes("claude install: stale"), true);       // nothing installed there yet
+  clean(root); clean(home); clean(cfg);
+});
+
+function cliFixture() {
+  const f = claudeFixture(); const home = tmp();
+  fs.mkdirSync(path.join(home, ".claude/agents"), { recursive: true });
+  return { ...f, home, opts: { root: f.root, home, settingsPath: f.sp, vibeConfigPath: f.vp, skillsHome: path.join(f.root, "pi-skills") } };
+}
+
+test("runCli: install --no-claude writes nothing under an existing claude dir and says so", () => {
+  const f = cliFixture();
+  const r = gen.runCli(["install", "--no-claude"], {}, f.opts);
+  eq(r.exitCode, 0);
+  eq(r.out.includes("claude: skipped (--no-claude)"), true);
+  eq(fs.readdirSync(path.join(f.home, ".claude/agents")).length, 0);
+  eq(fs.existsSync(path.join(f.home, ".claude/settings.json")), false);
+  clean(f.root); clean(f.claude); clean(f.home);
+});
+
+test("runCli: install resolves the default <home>/.claude and installs there", () => {
+  const f = cliFixture();
+  const r = gen.runCli(["install"], {}, f.opts);
+  eq(r.exitCode, 0);
+  eq(fs.existsSync(path.join(f.home, ".claude/agents/a.md")), true);
+  clean(f.root); clean(f.claude); clean(f.home);
+});
+
+test("runCli: install with a bad CLAUDE_CONFIG_DIR exits 1 with the skip line and touches no claude dir", () => {
+  const f = cliFixture();
+  const r = gen.runCli(["install"], { CLAUDE_CONFIG_DIR: "rel" }, f.opts);
+  eq(r.exitCode, 1);
+  eq(r.out.some(l => /^claude: skipped \(CLAUDE_CONFIG_DIR must be an absolute path/.test(l)), true);
+  eq(fs.readdirSync(path.join(f.home, ".claude/agents")).length, 0);
+  clean(f.root); clean(f.claude); clean(f.home);
+});
+
+test("runCli: unknown command prints usage on err and exits 1", () => {
+  const r = gen.runCli(["frobnicate"], {}, { root: tmp(), home: tmp() });
+  eq(r.exitCode, 1);
+  eq(r.err.some(l => /usage: generate\.mjs/.test(l)), true);
+});
+
 process.exitCode = await (async () => {
   let failed = 0;
   for (const t of tests) {

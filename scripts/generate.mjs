@@ -1497,34 +1497,48 @@ export function runUpdate(root, settingsPath, vibeConfigPath, skillsHome, claude
   return runFlow(root, settingsPath ?? DEFAULT_SETTINGS(), vibeConfigPath ?? DEFAULT_VIBE_CONFIG(), "update", skillsHome, claudeHome);
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
-  const cmd = process.argv[2];
+// The CLI as a function so it can be tested against a temp root and temp config
+// paths; `opts` = { root, home, settingsPath, vibeConfigPath, skillsHome }.
+export function runCli(argv, env, opts = {}) {
+  const root = opts.root ?? REPO_ROOT;
+  const cmd = argv[0];
+  const out = [], err = [];
   let claudeHome = null;
   let claudeError = null;
-  const noClaude = process.argv.includes("--no-claude");
+  const noClaude = argv.includes("--no-claude");
   if (!noClaude) {
-    const c = resolveClaudeHome(process.env, os.homedir());
+    const c = resolveClaudeHome(env, opts.home ?? os.homedir());
     if (c.error) claudeError = c.error;
     else claudeHome = c.dir;
   }
   try {
     if (cmd === "status") {
-      const st = printStatus(REPO_ROOT, loadManifest(REPO_ROOT), { claudeHome, claudeError });
-      console.log(st.output.trimEnd());
-      process.exit(st.exitCode);
+      const st = printStatus(root, loadManifest(root), { claudeHome, claudeError });
+      out.push(st.output.trimEnd());
+      return { exitCode: st.exitCode, out, err };
     }
     if (cmd === "install" || cmd === "update") {
-      const r = cmd === "install"
-        ? runInstall(REPO_ROOT, undefined, undefined, undefined, claudeHome)
-        : runUpdate(REPO_ROOT, undefined, undefined, undefined, claudeHome);
-      if (noClaude) console.log("claude: skipped (--no-claude)");
-      for (const line of r.report) console.log(line);
+      const run = cmd === "install" ? runInstall : runUpdate;
+      const r = run(root, opts.settingsPath, opts.vibeConfigPath, opts.skillsHome, claudeHome);
+      if (noClaude) out.push("claude: skipped (--no-claude)");
+      out.push(...r.report);
       if (claudeError) {
-        console.log(`claude: skipped (${claudeError})`);
-        process.exit(1);
+        out.push(`claude: skipped (${claudeError})`);
+        return { exitCode: 1, out, err };
       }
-      process.exit(r.exitCode);
+      return { exitCode: r.exitCode, out, err };
     }
-  } catch (e) { console.error(e.message); process.exit(1); }
-  console.error("usage: generate.mjs <install|update|status> [--no-claude]"); process.exit(1);
+  } catch (e) {
+    err.push(e.message);
+    return { exitCode: 1, out, err };
+  }
+  err.push("usage: generate.mjs <install|update|status> [--no-claude]");
+  return { exitCode: 1, out, err };
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+  const r = runCli(process.argv.slice(2), process.env);
+  for (const line of r.out) console.log(line);
+  for (const line of r.err) console.error(line);
+  process.exit(r.exitCode);
 }
