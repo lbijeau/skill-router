@@ -85,6 +85,8 @@ function skill(root, rel, name) {
 }
 
 const E = (over = {}) => ({ name: "x", url: "https://github.com/x/y", description: "d", persona: "p", ...over });
+// Claude artifacts for hand-built status fixtures (the claude column and router are part of the exit code).
+function writeClaudeArtifacts(root, manifest) { gen.writeClaudeAgentFiles(root, manifest); gen.writeClaudeRouterAgent(root); }
 
 test("discovery: names come from frontmatter, not dir names", () => {
   const root = tmp();
@@ -387,7 +389,7 @@ test("status: exit rules incl. expected absence for zero-skill entries", () => {
   w(root, "agents-vibe/one.toml", gen.renderVibeAgentTOML(manifest.repos[0], found.skills));
   gitRepo(path.join(root, "skills/zero"));           // clone ok, no skills
   gen.writeSkillCatalog(root, manifest);
-  gen.writeRouterAgent(root);
+  gen.writeRouterAgent(root); writeClaudeArtifacts(root, manifest);
   const r = gen.statusOf(root, manifest);
   eq(r.catalog, "in-sync");
   eq(r.router, "in-sync");
@@ -414,7 +416,7 @@ test("status: zero-skill leftover TOML is stale and fails exit", () => {
   w(root, "agents-vibe/one.toml", gen.renderVibeAgentTOML(manifest.repos[0], found.skills));
   gitRepo(path.join(root, "skills/zero"));
   gen.writeSkillCatalog(root, manifest);
-  gen.writeRouterAgent(root);
+  gen.writeRouterAgent(root); writeClaudeArtifacts(root, manifest);
   w(root, "agents-vibe/zero.toml", "leftover");
   const r = gen.statusOf(root, manifest);
   eq(r.rows.find(x => x.name === "zero").vibe, "stale");
@@ -433,7 +435,7 @@ test("status: only-vibe-stale forces exit 1", () => {
   w(root, "agents/one.md", gen.renderAgentFile(manifest.repos[0], ["a"]));
   w(root, "agents-vibe/one.toml", "tampered");
   gen.writeSkillCatalog(root, manifest);
-  gen.writeRouterAgent(root);
+  gen.writeRouterAgent(root); writeClaudeArtifacts(root, manifest);
   const r = gen.statusOf(root, manifest);
   eq(r.rows[0].agent, "in-sync");
   eq(r.rows[0].vibe, "stale");
@@ -453,7 +455,7 @@ test("status: name collision with user agents dir is a warning, not an exit", ()
   w(root, "agents-vibe/one.toml", gen.renderVibeAgentTOML(manifest.repos[0], found.skills));
   w(ua, "one.toml", "user agent");
   gen.writeSkillCatalog(root, manifest);
-  gen.writeRouterAgent(root);
+  gen.writeRouterAgent(root); writeClaudeArtifacts(root, manifest);
   const r = gen.statusOf(root, manifest, { userAgentsDir: ua });
   eq(r.warnings.some(x => /one.*collision/.test(x)), true);
   eq(r.exitCode, 0);
@@ -478,7 +480,7 @@ test("status: stale, missing, dirty, not-a-repo, missing-clone all flagged", () 
   w(root, "skills/dirty/untracked.txt", "x");
   w(root, "skills/fake/junk.txt", "x");           // dir, no .git
   gen.writeSkillCatalog(root, manifest);
-  gen.writeRouterAgent(root);
+  gen.writeRouterAgent(root); writeClaudeArtifacts(root, manifest);
   const r = gen.statusOf(root, manifest);
   const by = n => r.rows.find(x => x.name === n);
   eq(by("stale").agent, "stale"); eq(by("stale").clone, "ok");
@@ -1334,7 +1336,7 @@ test("status: tampered catalog or router is stale and fails exit", () => {
   const found = gen.discoverSkills(path.join(root, "skills/one"), manifest.repos[0]);
   w(root, "agents-vibe/one.toml", gen.renderVibeAgentTOML(manifest.repos[0], found.skills));
   gen.writeSkillCatalog(root, manifest);
-  gen.writeRouterAgent(root);
+  gen.writeRouterAgent(root); writeClaudeArtifacts(root, manifest);
   w(root, "catalog/skill-catalog.md", "tampered");
   let r = gen.statusOf(root, manifest);
   eq(r.catalog, "stale");
@@ -1394,7 +1396,7 @@ test("statusOf: missing clone gets skip semantics, catalog can be in-sync", () =
   const found = gen.discoverSkills(path.join(root, "skills/one"), manifest.repos[0]);
   w(root, "agents-vibe/one.toml", gen.renderVibeAgentTOML(manifest.repos[0], found.skills));
   gen.writeSkillCatalog(root, manifest, new Set(["gone"]));
-  gen.writeRouterAgent(root);
+  gen.writeRouterAgent(root); writeClaudeArtifacts(root, manifest);
   const r = gen.statusOf(root, manifest);
   eq(r.catalog, "in-sync");
   eq(r.rows.find(x => x.name === "gone").clone, "missing");
@@ -1412,14 +1414,17 @@ test("printStatus: catalog/router values align under their header columns", () =
   const found = gen.discoverSkills(path.join(root, "skills/one"), manifest.repos[0]);
   w(root, "agents-vibe/one.toml", gen.renderVibeAgentTOML(manifest.repos[0], found.skills));
   gen.writeSkillCatalog(root, manifest);
-  gen.writeRouterAgent(root);
+  gen.writeRouterAgent(root); writeClaudeArtifacts(root, manifest);
   const lines = gen.printStatus(root, manifest).output.split("\n");
   const header = lines[0];
   const values = lines[1];
-  eq(header.indexOf("CATALOG"), 51);
-  eq(values.slice(0, 51).trim(), "");
-  eq(values.slice(51, 61).trim(), "in-sync");
-  eq(values.slice(61).trim(), "in-sync");
+  eq(header.indexOf("CLAUDE"), 51);
+  eq(header.indexOf("CATALOG"), 61);
+  eq(values.slice(0, 61).trim(), "");
+  eq(values.slice(61, 71).trim(), "in-sync");
+  eq(values.slice(71).trim(), "in-sync");
+  eq(lines[2].slice(51, 61).trim(), "in-sync");                       // claude column under its header
+  eq(lines[3], "claude install: n/a");                                // line after the data rows
   clean(root);
 });
 
@@ -1847,6 +1852,191 @@ test("claudeSkillsState: in-sync, stale when differing, stale when missing", () 
   fs.appendFileSync(path.join(home, "route-skill/SKILL.md"), "x");
   eq(gen.claudeSkillsState(root, home), "stale");
   clean(root); clean(path.dirname(home));
+});
+
+// ---- Claude Code target: Task 4 ----
+function claudeFixture({ names = ["a"], claudeAgentsDir = false } = {}) {
+  const root = tmp(); const remote = bareRemote(root); remote.add(path.join("skills", "one"), "one");
+  w(root, "repos.json", JSON.stringify({ repos: names.map(n => ({ name: n, url: remote.url, description: "d", persona: "p" })) }));
+  fs.mkdirSync(path.join(root, "global-skills-claude/route-skill"), { recursive: true });
+  fs.copyFileSync(path.join(gen.REPO_ROOT, "global-skills-claude/route-skill/SKILL.md"),
+    path.join(root, "global-skills-claude/route-skill/SKILL.md"));
+  const claude = tmp();
+  if (claudeAgentsDir) fs.mkdirSync(path.join(claude, "agents"));
+  return { root, claude, sp: path.join(root, "settings.json"), vp: path.join(root, "config.toml") };
+}
+const lineOf = (report, re) => report.find(l => re.test(l));
+
+test("install: generates agents-claude, installs into an existing claude home, adds rules, syncs route-skill", () => {
+  const f = claudeFixture({ names: ["a"], claudeAgentsDir: true });
+  const r = gen.runInstall(f.root, f.sp, f.vp, undefined, f.claude);
+  eq(r.exitCode, 0);
+  eq(gen.isOwnedClaudeAgent(path.join(f.root, "agents-claude/a.md")), true);
+  eq(gen.isOwnedClaudeAgent(path.join(f.claude, "agents/a.md")), true);
+  eq(gen.isOwnedClaudeAgent(path.join(f.claude, "agents/skill-router.md")), true);
+  eq(gen.hasClaudeReadRules(path.join(f.claude, "settings.json"), gen.claudeReadRules(f.root).rules), true);
+  eq(fs.existsSync(path.join(f.claude, "skills/route-skill/SKILL.md")), true);
+  eq(Boolean(lineOf(r.report, /^claude: agents installed: .*\ba\b/)), true);
+  eq(Boolean(lineOf(r.report, /^claude: allow rules added/)), true);
+  eq(Boolean(lineOf(r.report, /^claude: skills synced: route-skill/)), true);
+  eq(Boolean(lineOf(r.report, /^a: cloned, 1 skills, agent written \(pi, vibe\)$/)), true);   // claude is not appended here
+  clean(f.root); clean(f.claude);
+});
+
+test("install: a repo removed from the manifest is gone from claude agents after one run", () => {
+  const f = claudeFixture({ names: ["a", "b"], claudeAgentsDir: true });
+  gen.runInstall(f.root, f.sp, f.vp, undefined, f.claude);
+  eq(fs.existsSync(path.join(f.claude, "agents/b.md")), true);
+  const m = JSON.parse(fs.readFileSync(path.join(f.root, "repos.json"), "utf8"));
+  m.repos = m.repos.filter(x => x.name === "a");
+  w(f.root, "repos.json", JSON.stringify(m));
+  gen.runInstall(f.root, f.sp, f.vp, undefined, f.claude);
+  eq(fs.existsSync(path.join(f.claude, "agents/b.md")), false);
+  eq(fs.existsSync(path.join(f.root, "agents-claude/b.md")), false);
+  eq(fs.existsSync(path.join(f.claude, "agents/a.md")), true);
+  clean(f.root); clean(f.claude);
+});
+
+test("install: claude home absent is skipped with one note, exit 0, directory not created", () => {
+  const f = claudeFixture();
+  const missing = path.join(f.claude, "nope");
+  const r = gen.runInstall(f.root, f.sp, f.vp, undefined, missing);
+  eq(r.exitCode, 0);
+  eq(fs.existsSync(missing), false);
+  eq(r.report.filter(l => /^claude: skipped/.test(l)).length, 1);
+  eq(fs.existsSync(path.join(f.root, "agents-claude/a.md")), true);     // generation still runs
+  clean(f.root); clean(f.claude);
+});
+
+test("install: claudeHome undefined or null writes nothing under HOME and prints no claude: lines", () => {
+  const home = tmp(); const saved = process.env.HOME; process.env.HOME = home;
+  try {
+    for (const arg of [undefined, null]) {
+      const f = claudeFixture();
+      const r = arg === undefined ? gen.runInstall(f.root, f.sp, f.vp, path.join(f.root, "pi-skills"))
+        : gen.runInstall(f.root, f.sp, f.vp, path.join(f.root, "pi-skills"), null);
+      eq(r.report.some(l => /^claude:/.test(l)), false);
+      eq(fs.existsSync(path.join(home, ".claude")), false);
+      clean(f.root); clean(f.claude);
+    }
+  } finally { process.env.HOME = saved; clean(home); }
+});
+
+test("install: restart reminder only when agents dir created; /reload-skills only when skills dir created", () => {
+  const f = claudeFixture();
+  const r1 = gen.runInstall(f.root, f.sp, f.vp, undefined, f.claude);
+  eq(Boolean(lineOf(r1.report, /^reminder: .*restart Claude Code/)), true);
+  eq(Boolean(lineOf(r1.report, /^reminder: .*\/reload-skills/)), true);
+  const r2 = gen.runInstall(f.root, f.sp, f.vp, undefined, f.claude);
+  eq(Boolean(lineOf(r2.report, /restart Claude Code/)), false);
+  eq(Boolean(lineOf(r2.report, /\/reload-skills/)), false);
+  clean(f.root); clean(f.claude);
+});
+
+test("install: unmarked same-name claude agent is refused and reported, exit unaffected", () => {
+  const f = claudeFixture({ claudeAgentsDir: true });
+  w(f.claude, "agents/a.md", "mine\n");
+  const r = gen.runInstall(f.root, f.sp, f.vp, undefined, f.claude);
+  eq(r.exitCode, 0);
+  eq(fs.readFileSync(path.join(f.claude, "agents/a.md"), "utf8"), "mine\n");
+  eq(Boolean(lineOf(r.report, /^claude: refused .*a\.md/)), true);
+  clean(f.root); clean(f.claude);
+});
+
+test("install: unparseable claude settings prints the exact remedy with both rules", () => {
+  const f = claudeFixture({ claudeAgentsDir: true });
+  w(f.claude, "settings.json", "{ nope");
+  const r = gen.runInstall(f.root, f.sp, f.vp, undefined, f.claude);
+  eq(r.exitCode, 0);
+  eq(fs.readFileSync(path.join(f.claude, "settings.json"), "utf8"), "{ nope");
+  eq(Boolean(lineOf(r.report, /^claude: allow rules skipped \(.*unparseable/)), true);
+  const remedy = lineOf(r.report, /^claude: add manually/);
+  for (const rule of gen.claudeReadRules(f.root).rules) eq(remedy.includes(rule), true);
+  clean(f.root); clean(f.claude);
+});
+
+test("resolveClaudeHome: relative, missing and non-directory error; empty falls back; default is <home>/.claude", () => {
+  const d = tmp(); fs.writeFileSync(path.join(d, "f"), "x");
+  eq(typeof gen.resolveClaudeHome({ CLAUDE_CONFIG_DIR: "rel/dir" }, "/h").error, "string");
+  eq(typeof gen.resolveClaudeHome({ CLAUDE_CONFIG_DIR: path.join(d, "nope") }, "/h").error, "string");
+  eq(typeof gen.resolveClaudeHome({ CLAUDE_CONFIG_DIR: path.join(d, "f") }, "/h").error, "string");
+  eq(gen.resolveClaudeHome({ CLAUDE_CONFIG_DIR: "" }, "/h").dir, path.join("/h", ".claude"));
+  eq(gen.resolveClaudeHome({}, "/h").dir, path.join("/h", ".claude"));
+  eq(gen.resolveClaudeHome({ CLAUDE_CONFIG_DIR: d }, "/h").dir, d);
+  clean(d);
+});
+
+function statusFixture() {
+  const root = tmp();
+  const manifest = { repos: [{ name: "one", url: "https://github.com/x/y", description: "d", persona: "p" },
+    { name: "zero", url: "https://github.com/x/y", description: "d", persona: "p" }] };
+  w(root, "repos.json", JSON.stringify(manifest));
+  skill(root, "skills/one/a"); gitRepo(path.join(root, "skills/one")); gitRepo(path.join(root, "skills/zero"));
+  gen.writeAgentFiles(root, manifest); gen.writeVibeAgentFiles(root, manifest);
+  gen.writeSkillCatalog(root, manifest); gen.writeRouterAgent(root); writeClaudeArtifacts(root, manifest);
+  return { root, manifest };
+}
+
+test("status: claude column in-sync, stale, missing, and — for zero skills", () => {
+  const { root, manifest } = statusFixture();
+  let r = gen.statusOf(root, manifest);
+  eq(r.rows.find(x => x.name === "one").claude, "in-sync");
+  eq(r.rows.find(x => x.name === "zero").claude, "—");
+  eq(r.exitCode, 0);
+  fs.appendFileSync(path.join(root, "agents-claude/one.md"), "x");
+  eq(gen.statusOf(root, manifest).rows[0].claude, "stale");
+  fs.rmSync(path.join(root, "agents-claude/one.md"));
+  r = gen.statusOf(root, manifest);
+  eq(r.rows[0].claude, "missing");
+  eq(r.exitCode, 1);
+  clean(root);
+});
+
+test("status: claudeRouter stale on its own forces exit 1", () => {
+  const { root, manifest } = statusFixture();
+  w(root, "agents-claude/skill-router.md", "tampered");
+  const r = gen.statusOf(root, manifest);
+  eq(r.claudeRouter, "stale");
+  eq(r.router, "in-sync"); eq(r.catalog, "in-sync");
+  eq(r.rows.every(x => x.agent === "in-sync" && (x.claude === "in-sync" || x.claude === "—")), true);
+  eq(r.exitCode, 1);
+  clean(root);
+});
+
+test("status: claudeInstall n/a without claudeHome or when it does not exist", () => {
+  const { root, manifest } = statusFixture();
+  eq(gen.statusOf(root, manifest).claudeInstall, "n/a");
+  eq(gen.statusOf(root, manifest, { claudeHome: path.join(root, "nope") }).claudeInstall, "n/a");
+  eq(gen.statusOf(root, manifest, { claudeHome: path.join(root, "nope") }).exitCode, 0);
+  clean(root);
+});
+
+test("status: claudeInstall stale/in-sync across copies, rules and route-skill; refused is a warning", () => {
+  const { root, manifest } = statusFixture();
+  fs.mkdirSync(path.join(root, "global-skills-claude/route-skill"), { recursive: true });
+  fs.copyFileSync(path.join(gen.REPO_ROOT, "global-skills-claude/route-skill/SKILL.md"), path.join(root, "global-skills-claude/route-skill/SKILL.md"));
+  const claude = tmp(); const sp = path.join(claude, "settings.json");
+  const st = () => gen.statusOf(root, manifest, { claudeHome: claude });
+  eq(st().claudeInstall, "stale");                                        // nothing installed yet
+  gen.installClaudeAgents(root, path.join(claude, "agents"));
+  eq(st().claudeInstall, "stale");                                        // rules and route-skill missing
+  gen.mergeClaudePermissions(sp, gen.claudeReadRules(root).rules);
+  eq(st().claudeInstall, "stale");                                        // route-skill missing
+  gen.syncClaudeSkills(root, path.join(claude, "skills"));
+  let r = st();
+  eq(r.claudeInstall, "in-sync"); eq(r.exitCode, 0);
+  fs.appendFileSync(path.join(claude, "agents/one.md"), "\n");
+  eq(st().claudeInstall, "stale"); eq(st().exitCode, 1);
+  gen.installClaudeAgents(root, path.join(claude, "agents"));
+  fs.rmSync(path.join(claude, "agents/one.md")); w(claude, "agents/one.md", "mine\n");
+  r = st();
+  eq(r.claudeInstall, "in-sync");
+  eq(r.warnings.some(x => /one/.test(x) && /not generated/.test(x)), true);
+  fs.writeFileSync(sp, "{ bad");
+  r = st();
+  eq(r.claudeInstall, "in-sync");                                         // unparseable settings: warning, not stale
+  eq(r.warnings.some(x => /unparseable/.test(x)), true);
+  clean(root); clean(claude);
 });
 
 process.exitCode = await (async () => {
