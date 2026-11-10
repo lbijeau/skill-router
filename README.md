@@ -93,8 +93,8 @@ Then:
 
 `scripts/generate.mjs` is the entry point and still re-exports everything, so
 `scripts/test.mjs` and `install.sh` use it unchanged. The code behind it is split
-so that imports point one way (`common` to `discover` to `claude` to
-`generate`):
+so that imports only point down this list (each file imports from the ones
+above it, never from below), which keeps the graph acyclic:
 
 - `scripts/common.mjs`: shared helpers (paths, text normalising, atomic writes,
   status constants, the router body).
@@ -239,6 +239,17 @@ Known work left over from the Claude Code target (PR #4), none of it blocking.
   such as `runInstall(root, settingsPath, vibeConfigPath)` silently falls back to
   the real pi and Vibe config, and `runInstall(root, null)` throws. A
   `typeof paths !== "object"` guard in `flowPaths` would catch both.
+
+**Review leftovers (from PR C)**
+- `generate.mjs` re-exports the three modules with `export *`, so it now exposes
+  eight extra names (`NAME_RE`, `STATE`, `atomicWrite`, `isSymlink`,
+  `normalizeText`, `realPath`, `runClaudeInstall`, `pruneClaudeAgents`), and no
+  test pins the export list: a future same-named export in two modules would
+  vanish from the re-export silently. A one-line test, or explicit named
+  re-exports, would close that.
+- `isSymlink` lives in `common.mjs` but only `claude.mjs` uses it;
+  `pruneClaudeAgents` sits at the end of `claude.mjs`, far from `ownedOrphans`;
+  `prune` could write `const claudeAgents = pruneClaudeAgents(root, names)`.
 
 **Naming**
 - `writeClaudeRouterAgent` is a thin wrapper kept for symmetry with
