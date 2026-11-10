@@ -1835,12 +1835,13 @@ test("syncClaudeSkills: writes route-skill; refuses unmarked file and symlinked 
   clean(root); clean(path.dirname(home));
 });
 
-test("syncClaudeSkills: nothing is written under a pi skills home", () => {
-  const root = tmp(), home = path.join(tmp(), "claude-skills"), pi = tmp();
-  w(root, "global-skills-claude/route-skill/SKILL.md", "---\nname: route-skill\n---\n" + gen.GLOBAL_SKILL_HEADER + " -->\n");
-  gen.syncClaudeSkills(root, home);
-  eq(fs.readdirSync(pi).length, 0);
-  clean(root); clean(path.dirname(home)); clean(pi);
+test("install: route-skill for claude lands in the claude skills dir and never in the pi skills home", () => {
+  const f = claudeFixture({ claudeAgentsDir: true }); const pi = path.join(f.root, "pi-skills");
+  const r = gen.runInstall(f.root, f.sp, f.vp, pi, f.claude);
+  eq(r.exitCode, 0);
+  eq(fs.existsSync(path.join(f.claude, "skills/route-skill/SKILL.md")), true);
+  eq(fs.existsSync(pi) ? fs.readdirSync(pi).length : 0, 0);
+  clean(f.root); clean(f.claude);
 });
 
 test("claudeSkillsState: in-sync, stale when differing, stale when missing", () => {
@@ -1910,13 +1911,16 @@ test("install: claude home absent is skipped with one note, exit 0, directory no
 
 test("install: claudeHome undefined or null writes nothing under HOME and prints no claude: lines", () => {
   const home = tmp(); const saved = process.env.HOME; process.env.HOME = home;
+  fs.mkdirSync(path.join(home, ".claude/agents"), { recursive: true });      // a default would install here
   try {
     for (const arg of [undefined, null]) {
       const f = claudeFixture();
       const r = arg === undefined ? gen.runInstall(f.root, f.sp, f.vp, path.join(f.root, "pi-skills"))
         : gen.runInstall(f.root, f.sp, f.vp, path.join(f.root, "pi-skills"), null);
       eq(r.report.some(l => /^claude:/.test(l)), false);
-      eq(fs.existsSync(path.join(home, ".claude")), false);
+      eq(fs.readdirSync(path.join(home, ".claude/agents")).length, 0);
+      eq(fs.existsSync(path.join(home, ".claude/settings.json")), false);
+      eq(fs.existsSync(path.join(home, ".claude/skills")), false);
       clean(f.root); clean(f.claude);
     }
   } finally { process.env.HOME = saved; clean(home); }
@@ -2349,6 +2353,32 @@ test("runCli: unknown command prints usage on err and exits 1", () => {
   const r = gen.runCli(["frobnicate"], {}, { root: tmp(), home: tmp() });
   eq(r.exitCode, 1);
   eq(r.err.some(l => /usage: generate\.mjs/.test(l)), true);
+});
+
+test("installClaudeAgents: symlinked destination to an unmarked file is refused and the target untouched", () => {
+  const root = tmp(), base = tmp(), dest = path.join(base, "agents");
+  claudeSrc(root, ["a"]);
+  w(base, "dotfiles/a.md", "hand written\n");
+  fs.mkdirSync(dest, { recursive: true });
+  fs.symlinkSync(path.join(base, "dotfiles/a.md"), path.join(dest, "a.md"));
+  const r = gen.installClaudeAgents(root, dest);
+  eq(r.refused.join(), "a");
+  eq(fs.lstatSync(path.join(dest, "a.md")).isSymbolicLink(), true);
+  eq(fs.readFileSync(path.join(base, "dotfiles/a.md"), "utf8"), "hand written\n");
+  clean(root); clean(base);
+});
+
+test("mergeClaudePermissions: a same-size change with a different mtime mid-merge aborts without writing", () => {
+  const dir = tmp(); const sp = path.join(dir, "settings.json");
+  fs.writeFileSync(sp, '{"a":1}\n');
+  const r = gen.mergeClaudePermissions(sp, RULES, { onBeforeCommit: () => {
+    fs.writeFileSync(sp, '{"a":2}\n');                                          // same length
+    const t = new Date(Date.now() + 60000); fs.utimesSync(sp, t, t);
+  } });
+  eq(r.changed, false);
+  eq(/changed/.test(r.error), true);
+  eq(fs.readFileSync(sp, "utf8"), '{"a":2}\n');
+  clean(dir);
 });
 
 process.exitCode = await (async () => {
