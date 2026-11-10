@@ -211,25 +211,13 @@ Known work left over from the Claude Code target (PR #4), none of it blocking.
 - `scripts/generate.mjs` is about 1,500 lines covering rendering, install,
   permissions merge, skills sync, status and the CLI. Split the Claude parts
   into their own module (for example `claude.mjs`).
-- The loop that finds orphaned owned agents exists three times (`prune`,
-  `installClaudeAgents`, `claudeAgentsInstallState`). Extract one helper.
-- The agent and router frontmatter is built in two places. Share one helper.
-- `runFlow`, `runInstall` and `runUpdate` take five positional arguments
-  (`root, settingsPath, vibeConfigPath, skillsHome, claudeHome`). Use an
-  options object. Status strings (`"in-sync"`, `"stale"`, `"missing"`, `"—"`)
-  are repeated literals; the per-target status block repeats three times.
-- `statusOf` embeds the whole Claude install check. Move it into a
-  `claudeInstallStatus(root, claudeHome)` function.
-- `claudeSkillsState` and `claudeSkillsRefused` re-read the same sources, and
-  `statusOf` parses `settings.json` twice. Return `{ stale, refused }` from one
-  function, and let `hasClaudeReadRules` report an unparseable file itself.
 
 **Review leftovers (from PR A)**
 - No test covers the restart and `/reload-skills` reminders surviving a step that
   fails after creating its directory; that needs a fault-injection seam. The
   reminders can also fire for an empty directory when the write that followed
   failed, or when no agent is valid.
-- `normRule` resolves a rule whose glob is in the first path segment
+- `normalizeReadRule` resolves a rule whose glob is in the first path segment
   (`Read(//**)`) against the current directory, and `hasClaudeReadRules` throws
   on a `null` home. The injected home reaches the rule functions and
   `resolveClaudeHome`, but not `statusOf` or `runClaudeInstall`.
@@ -237,10 +225,14 @@ Known work left over from the Claude Code target (PR #4), none of it blocking.
   `settingsPath` or `vibeConfigPath`. The "route-skill never lands in the pi
   skills home" test could pre-create the directory and assert it stays empty.
 
+- `runInstall` and `runUpdate` take an options object now: a stale positional call
+  such as `runInstall(root, settingsPath, vibeConfigPath)` silently falls back to
+  the real pi and Vibe config, and `runInstall(root, null)` throws. A
+  `typeof paths !== "object"` guard in `flowPaths` would catch both.
+
 **Naming**
-- `normRule`, `step`, the `skip` helper in `mergeClaudePermissions`, and
-  `claudeText` (a markdown helper built on a TOML-named function) could be
-  clearer; `writeClaudeRouterAgent` is a thin wrapper.
+- `writeClaudeRouterAgent` is a thin wrapper kept for symmetry with
+  `writeRouterAgent`.
 
 **Deferred by design**
 - `settings.json.bak` is overwritten by each merge, and the temporary file it is
