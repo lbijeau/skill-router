@@ -1377,7 +1377,7 @@ test("runFlow: skillsHome is injectable, global skill synced there", () => {
   skill(root, "skills/one/a");
   gitRepo(path.join(root, "skills/one"));
   w(root, "global-skills/route-skill/SKILL.md", "---\nname: route-skill\ndescription: d\n---\nbody\n");
-  const r = gen.runInstall(root, path.join(settings, "settings.json"), null, skillsHome);
+  const r = gen.runInstall(root, path.join(settings, "settings.json"), path.join(settings, "config.toml"), skillsHome);
   eq(r.exitCode, 0);
   eq(fs.existsSync(path.join(skillsHome, "route-skill", "SKILL.md")), true);
   eq(fs.existsSync(path.join(os.homedir(), ".pi/agent/skills/route-skill-test-never")), false);
@@ -2037,6 +2037,74 @@ test("status: claudeInstall stale/in-sync across copies, rules and route-skill; 
   eq(r.claudeInstall, "in-sync");                                         // unparseable settings: warning, not stale
   eq(r.warnings.some(x => /unparseable/.test(x)), true);
   clean(root); clean(claude);
+});
+
+// ---- Claude Code target: final-review fixes ----
+test("install: filesystem errors in the claude block are reported, never thrown (agents file, settings dir, skill dir)", () => {
+  const cases = {
+    "agents is a regular file": f => w(f.claude, "agents", "not a dir"),
+    "agents is a dangling symlink": f => fs.symlinkSync(path.join(f.claude, "nowhere"), path.join(f.claude, "agents")),
+    "settings.json is a directory": f => fs.mkdirSync(path.join(f.claude, "settings.json")),
+    "route-skill SKILL.md is a directory": f => fs.mkdirSync(path.join(f.claude, "skills/route-skill/SKILL.md"), { recursive: true }),
+  };
+  for (const [name, setup] of Object.entries(cases)) {
+    const f = claudeFixture();
+    setup(f);
+    let r;
+    try { r = gen.runInstall(f.root, f.sp, f.vp, undefined, f.claude); }
+    catch (e) { assert.fail(`${name}: install threw ${e.message}`); }
+    eq(r.exitCode, 0, name);
+    const expect = name.startsWith("route-skill") ? /^claude: refused skill route-skill/ : /^claude: .*skipped \(/;
+    eq(r.report.some(l => expect.test(l)), true, name);
+    eq(r.report.some(l => /^a: cloned/.test(l)), true, name);          // the rest of the report survives
+    clean(f.root); clean(f.claude);
+  }
+});
+
+test("status: a filesystem error in the claude block is a warning and stale, never a throw", () => {
+  const { root, manifest } = statusFixture();
+  const claude = tmp(); w(claude, "agents", "not a dir");
+  let r;
+  try { r = gen.statusOf(root, manifest, { claudeHome: claude }); }
+  catch (e) { assert.fail(`statusOf threw ${e.message}`); }
+  eq(r.claudeInstall, "stale");
+  eq(r.warnings.some(x => /^claude:/.test(x)), true);
+  clean(root); clean(claude);
+});
+
+test("status: a user's own route-skill is refused by install and is a warning, not stale, in status", () => {
+  const { root, manifest } = statusFixture();
+  w(root, "global-skills-claude/route-skill/SKILL.md", fs.readFileSync(path.join(gen.REPO_ROOT, "global-skills-claude/route-skill/SKILL.md"), "utf8"));
+  const claude = tmp(); const sp = path.join(claude, "settings.json");
+  gen.installClaudeAgents(root, path.join(claude, "agents"));
+  gen.mergeClaudePermissions(sp, gen.claudeReadRules(root).rules);
+  w(claude, "skills/route-skill/SKILL.md", "my own skill\n");
+  eq(gen.syncClaudeSkills(root, path.join(claude, "skills")).refused.join(), "route-skill");
+  eq(gen.claudeSkillsState(root, path.join(claude, "skills")), "in-sync");
+  eq(gen.claudeSkillsRefused(root, path.join(claude, "skills")).join(), "route-skill");
+  const r = gen.statusOf(root, manifest, { claudeHome: claude });
+  eq(r.claudeInstall, "in-sync"); eq(r.exitCode, 0);
+  eq(r.warnings.some(x => /route-skill/.test(x) && /not generated/.test(x)), true);
+  clean(root); clean(claude);
+});
+
+test("mergeClaudePermissions: a dangling symlinked settings.json is left alone with an error", () => {
+  const dir = tmp(); const link = path.join(dir, "settings.json");
+  fs.symlinkSync(path.join(dir, "not-mounted/settings.json"), link);
+  const r = gen.mergeClaudePermissions(link, RULES);
+  eq(r.changed, false);
+  eq(/dangling/.test(r.error), true);
+  eq(fs.lstatSync(link).isSymbolicLink(), true);
+  clean(dir);
+});
+
+test("printStatus: a stale claude router is shown, not only in the exit code", () => {
+  const { root, manifest } = statusFixture();
+  w(root, "agents-claude/skill-router.md", "tampered");
+  const st = gen.printStatus(root, manifest);
+  eq(st.exitCode, 1);
+  eq(st.output.includes("claude router: stale"), true);
+  clean(root);
 });
 
 process.exitCode = await (async () => {
