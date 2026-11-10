@@ -225,6 +225,11 @@ Known work left over from the Claude Code target (PR #4), none of it blocking.
   `settingsPath` or `vibeConfigPath`. The "route-skill never lands in the pi
   skills home" test could pre-create the directory and assert it stays empty.
 
+- `runInstall` and `runUpdate` take an options object now: a stale positional call
+  such as `runInstall(root, settingsPath, vibeConfigPath)` silently falls back to
+  the real pi and Vibe config, and `runInstall(root, null)` throws. A
+  `typeof paths !== "object"` guard in `flowPaths` would catch both.
+
 **Naming**
 - `writeClaudeRouterAgent` is a thin wrapper kept for symmetry with
   `writeRouterAgent`.
