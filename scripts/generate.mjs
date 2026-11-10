@@ -289,16 +289,17 @@ export function claudeText(s, { keepNewlines = false } = {}) {
   return normalizeTomlText(String(s).replace(/[\u0085\u2028\u2029]/g, "\n"), { keepNewlines });
 }
 
+// The four frontmatter keys, once each, in this order; validateClaudeAgentSource
+// accepts exactly this shape.
+function claudeFrontmatter(name, description) {
+  return ["---", `name: ${name}`, `description: ${yamlQuote(description)}`, CLAUDE_TOOLS_LINE, "omitClaudeMd: true", "---"];
+}
+
 export function renderClaudeAgentFile(entry, skills, { home } = {}) {
   const description = claudeText(entry.description);
   if (description === "") throw new Error(`${entry.name}: empty description`);
   return [
-    "---",
-    `name: ${entry.name}`,
-    `description: ${yamlQuote(description)}`,
-    CLAUDE_TOOLS_LINE,
-    "omitClaudeMd: true",
-    "---",
+    ...claudeFrontmatter(entry.name, description),
     claudeText(entry.persona, { keepNewlines: true }),
     "",
     CLAUDE_BOILERPLATE,
@@ -460,12 +461,7 @@ export function renderRouterAgent({ root = REPO_ROOT, home } = {}) {
 
 export function renderClaudeRouterAgent({ root = REPO_ROOT, home } = {}) {
   return [
-    "---",
-    `name: ${ROUTER_AGENT_NAME}`,
-    `description: ${yamlQuote(ROUTER_DESCRIPTION)}`,
-    CLAUDE_TOOLS_LINE,
-    "omitClaudeMd: true",
-    "---",
+    ...claudeFrontmatter(ROUTER_AGENT_NAME, ROUTER_DESCRIPTION),
     ...routerBodyLines(root, home),
     "",
     CLAUDE_MARKER,
