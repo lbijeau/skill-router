@@ -219,7 +219,7 @@ export const VIBE_BOILERPLATE = [
   "If a read comes back truncated, say so.",
 ].join("\n");
 
-function normalizeTomlText(s, { keepNewlines = false } = {}) {
+function normalizeText(s, { keepNewlines = false } = {}) {
   let out = String(s)
     .replace(/\r\n?/g, "\n")
     .replace(/\t/g, " ")
@@ -256,8 +256,8 @@ export function skillRows(skills, home, escape = x => x) {
 
 export function renderVibeAgentTOML(entry, skills, { home } = {}) {
   const homeDir = home ?? os.homedir();
-  const description = tomlEscape(normalizeTomlText(entry.description));
-  const persona = tomlEscape(normalizeTomlText(entry.persona, { keepNewlines: true }));
+  const description = tomlEscape(normalizeText(entry.description));
+  const persona = tomlEscape(normalizeText(entry.persona, { keepNewlines: true }));
   const rows = skillRows(skills ?? [], homeDir, tomlEscape);
   return [
     'agent_type = "subagent"',
@@ -284,9 +284,9 @@ export const CLAUDE_BOILERPLATE = [
   "If a read comes back truncated, say so.",
 ].join("\n");
 
-// normalizeTomlText plus the Unicode line breaks YAML and markdown also treat as newlines.
+// normalizeText (shared by the TOML and markdown renderers) plus the Unicode line breaks YAML and markdown also treat as newlines.
 export function claudeText(s, { keepNewlines = false } = {}) {
-  return normalizeTomlText(String(s).replace(/[\u0085\u2028\u2029]/g, "\n"), { keepNewlines });
+  return normalizeText(String(s).replace(/[\u0085\u2028\u2029]/g, "\n"), { keepNewlines });
 }
 
 // The four frontmatter keys, once each, in this order; validateClaudeAgentSource
@@ -720,7 +720,7 @@ export function claudeReadRules(repoRoot, home = os.homedir()) {
 
 // ~/ and // spellings of the same path compare equal, and the directory part
 // is resolved through symlinks (Claude Code matches on the resolved path).
-function normRule(rule, home = os.homedir()) {
+function normalizeReadRule(rule, home = os.homedir()) {
   const m = String(rule).match(/^Read\((.*)\)$/);
   if (!m) return String(rule);
   let p = m[1];
@@ -743,12 +743,12 @@ function claudeAllowList(parsed) {
 // is a test seam, called after the backup and before the final re-check.
 export function mergeClaudePermissions(settingsPath, rules, hooks = {}) {
   let target = settingsPath;
-  const skip = (error) => ({ changed: false, added: [], error });
+  const fail = (error) => ({ changed: false, added: [], error });
   let isLink = false;
   try { isLink = fs.lstatSync(settingsPath).isSymbolicLink(); } catch { /* absent: create at settingsPath */ }
   if (isLink) {
     try { target = fs.realpathSync(settingsPath); }
-    catch { return skip("settings.json is a dangling symlink, merge skipped"); }
+    catch { return fail("settings.json is a dangling symlink, merge skipped"); }
   }
   if (!fs.existsSync(target)) {
     fs.mkdirSync(path.dirname(target), { recursive: true });
@@ -759,27 +759,27 @@ export function mergeClaudePermissions(settingsPath, rules, hooks = {}) {
   const raw = fs.readFileSync(target, "utf8");
   let existing;
   try { existing = JSON.parse(raw); }
-  catch { return skip("unparseable settings file, merge skipped"); }
+  catch { return fail("unparseable settings file, merge skipped"); }
   if (existing === null || typeof existing !== "object" || Array.isArray(existing)) {
-    return skip("settings file top level is not an object, merge skipped");
+    return fail("settings file top level is not an object, merge skipped");
   }
   if ("permissions" in existing
       && (existing.permissions === null || typeof existing.permissions !== "object" || Array.isArray(existing.permissions))) {
-    return skip("permissions is not an object, merge skipped");
+    return fail("permissions is not an object, merge skipped");
   }
   if (existing.permissions && "allow" in existing.permissions && !Array.isArray(existing.permissions.allow)) {
-    return skip("permissions.allow is not an array, merge skipped");
+    return fail("permissions.allow is not an array, merge skipped");
   }
   const list = claudeAllowList(existing);
-  const present = new Set(list.map(r => normRule(r, hooks.home)));
-  const added = rules.filter(r => !present.has(normRule(r, hooks.home)));
+  const present = new Set(list.map(r => normalizeReadRule(r, hooks.home)));
+  const added = rules.filter(r => !present.has(normalizeReadRule(r, hooks.home)));
   if (added.length === 0) return { changed: false, added: [] };
   const next = { ...existing, permissions: { ...existing.permissions, allow: [...list, ...added] } };
   atomicWrite(target + ".bak", raw, 0o600);
   hooks.onBeforeCommit?.();
   const now = fs.statSync(target);
   if (now.size !== before.size || now.mtimeMs !== before.mtimeMs) {
-    return skip("settings file changed during merge, skipped");
+    return fail("settings file changed during merge, skipped");
   }
   atomicWrite(target, JSON.stringify(next, null, 2) + "\n", before.mode & 0o777);
   return { changed: true, added };
@@ -790,8 +790,8 @@ export function claudeRulesState(settingsPath, rules, home) {
   if (!fs.existsSync(settingsPath)) return "missing-file";
   let parsed;
   try { parsed = JSON.parse(fs.readFileSync(settingsPath, "utf8")); } catch { return "unparseable"; }
-  const present = new Set(claudeAllowList(parsed).map(r => normRule(r, home)));
-  return rules.every(r => present.has(normRule(r, home))) ? "ok" : "missing-rules";
+  const present = new Set(claudeAllowList(parsed).map(r => normalizeReadRule(r, home)));
+  return rules.every(r => present.has(normalizeReadRule(r, home))) ? "ok" : "missing-rules";
 }
 
 export function hasClaudeReadRules(settingsPath, rules, home) {
@@ -1424,11 +1424,11 @@ function runClaudeInstall(root, claudeHome, report) {
   const skillsExisted = fs.existsSync(skillsDir);
   // A filesystem error in one step (a file where a directory should be, a
   // dangling link, no permission) must not discard the rest of the report.
-  const step = (label, fn) => {
+  const attempt = (label, fn) => {
     try { return fn(); }
     catch (e) { report.push(`claude: ${label} skipped (${e.message})`); return null; }
   };
-  step("agents install", () => {
+  attempt("agents install", () => {
     const r = installClaudeAgents(root, agentsDir);
     report.push(r.installed.length
       ? `claude: agents installed: ${r.installed.join(", ")}`
@@ -1440,7 +1440,7 @@ function runClaudeInstall(root, claudeHome, report) {
     for (const x of r.invalid) report.push(`claude: invalid source ${x.name}: ${x.reason}`);
     if (r.pruneSkipped) report.push("claude: prune skipped (agents-claude/ has no valid agents)");
   });
-  step("allow rules", () => {
+  attempt("allow rules", () => {
     const rr = claudeReadRules(root);
     if (rr.error) { report.push(`claude: allow rules skipped (${rr.error})`); return; }
     const m = mergeClaudePermissions(settingsFile, rr.rules);
@@ -1453,7 +1453,7 @@ function runClaudeInstall(root, claudeHome, report) {
         : "claude: allow rules already configured");
     }
   });
-  step("skills sync", () => {
+  attempt("skills sync", () => {
     const r = syncClaudeSkills(root, skillsDir);
     if (r.written.length) report.push(`claude: skills synced: ${r.written.join(", ")}`);
     for (const n of r.refused) report.push(`claude: refused skill ${n} (existing file was not generated by skill-router)`);
