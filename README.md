@@ -224,36 +224,28 @@ Known work left over from the Claude Code target (PR #4), none of it blocking.
   `statusOf` parses `settings.json` twice. Return `{ stale, refused }` from one
   function, and let `hasClaudeReadRules` report an unparseable file itself.
 
-**Behaviour**
-- The per-repo report line still says `agent written (pi, vibe)` and never
-  mentions Claude.
-- `syncClaudeSkills` reports `dirCreated` even when nothing was written, so the
-  `/reload-skills` reminder can be spurious. The restart reminder is lost if the
-  agents step throws.
-- A missing Claude `settings.json` makes `status` stale without a warning line.
-- `claudeReadRules` does not refuse a backslash in the checkout path.
-- `hasClaudeReadRules` and `normRule` compare rule text as written: they do not
-  canonicalise realpaths, and `normRule` expands `~/` with `os.homedir()`
-  instead of the injected home.
-- `settings.json.bak` is written at the default mode and then set to 0600, and
-  each merge overwrites the previous backup.
-- `claudeAgentsInstallState` reports owned orphans as stale when no source is
-  valid, while the installer skips its prune (not reachable through the normal
-  flow).
-- Third-party skill descriptions can carry a NEL character into an agent's body
-  rows (`normalizeDescription` does not cover U+0085).
+**Review leftovers (from PR A)**
+- No test covers the restart and `/reload-skills` reminders surviving a step that
+  fails after creating its directory; that needs a fault-injection seam. The
+  reminders can also fire for an empty directory when the write that followed
+  failed, or when no agent is valid.
+- `normRule` resolves a rule whose glob is in the first path segment
+  (`Read(//**)`) against the current directory, and `hasClaudeReadRules` throws
+  on a `null` home. The injected home reaches the rule functions and
+  `resolveClaudeHome`, but not `statusOf` or `runClaudeInstall`.
+- `runCli` falls back to the real `~/.pi` and `~/.vibe` config if a test omits
+  `settingsPath` or `vibeConfigPath`. The "route-skill never lands in the pi
+  skills home" test could pre-create the directory and assert it stays empty.
 
-**Tests**
-- No CLI-level tests for `--no-claude` or the `CLAUDE_CONFIG_DIR` error path.
-- The "nothing written under a pi skills home" test would pass on any
-  implementation; the symlinked-destination test covers only an owned target;
-  the mid-merge test only detects a size change; the `.claude` existence
-  assertion in the HOME test is vacuous.
-- Naming: `normRule`, `step`, the `skip` helper in `mergeClaudePermissions`, and
+**Naming**
+- `normRule`, `step`, the `skip` helper in `mergeClaudePermissions`, and
   `claudeText` (a markdown helper built on a TOML-named function) could be
   clearer; `writeClaudeRouterAgent` is a thin wrapper.
 
 **Deferred by design**
+- `settings.json.bak` is overwritten by each merge, and the temporary file it is
+  written through exists for a few milliseconds at the default mode before being
+  set to 0600 and renamed; `--no-claude` is not sticky.
 - A clone symlink sweep (the live probe showed reads through a symlink in a
   clone prompt, so it is not needed today), an uninstall helper, and putting the
   checkout path in the ownership marker. Two checkouts installing into one

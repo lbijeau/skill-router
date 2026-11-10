@@ -724,7 +724,7 @@ test("install: report mentions both targets and prints reminders", () => {
     { name: "a", url: remote.url, description: "d", persona: "p" }]}));
   const r = gen.runInstall(root, sp, vp);
   eq(r.exitCode, 0);
-  eq(r.report.some(l => /a: cloned, 1 skills, agent written \(pi, vibe\)/.test(l)), true);
+  eq(r.report.some(l => /a: cloned, 1 skills, agent written \(pi, vibe, claude\)/.test(l)), true);
   eq(r.report.some(l => /vibe config: agent_paths added/.test(l)), true);
   eq(r.report.some(l => /vibe config: allowlist added/.test(l)), true);
   eq(r.report.includes("reminder: run /reload (or restart Vibe) to pick up new agents"), true);
@@ -1835,12 +1835,13 @@ test("syncClaudeSkills: writes route-skill; refuses unmarked file and symlinked 
   clean(root); clean(path.dirname(home));
 });
 
-test("syncClaudeSkills: nothing is written under a pi skills home", () => {
-  const root = tmp(), home = path.join(tmp(), "claude-skills"), pi = tmp();
-  w(root, "global-skills-claude/route-skill/SKILL.md", "---\nname: route-skill\n---\n" + gen.GLOBAL_SKILL_HEADER + " -->\n");
-  gen.syncClaudeSkills(root, home);
-  eq(fs.readdirSync(pi).length, 0);
-  clean(root); clean(path.dirname(home)); clean(pi);
+test("install: route-skill for claude lands in the claude skills dir and never in the pi skills home", () => {
+  const f = claudeFixture({ claudeAgentsDir: true }); const pi = path.join(f.root, "pi-skills");
+  const r = gen.runInstall(f.root, f.sp, f.vp, pi, f.claude);
+  eq(r.exitCode, 0);
+  eq(fs.existsSync(path.join(f.claude, "skills/route-skill/SKILL.md")), true);
+  eq(fs.existsSync(pi) ? fs.readdirSync(pi).length : 0, 0);
+  clean(f.root); clean(f.claude);
 });
 
 test("claudeSkillsState: in-sync, stale when differing, stale when missing", () => {
@@ -1879,7 +1880,7 @@ test("install: generates agents-claude, installs into an existing claude home, a
   eq(Boolean(lineOf(r.report, /^claude: agents installed: .*\ba\b/)), true);
   eq(Boolean(lineOf(r.report, /^claude: allow rules added/)), true);
   eq(Boolean(lineOf(r.report, /^claude: skills synced: route-skill/)), true);
-  eq(Boolean(lineOf(r.report, /^a: cloned, 1 skills, agent written \(pi, vibe\)$/)), true);   // claude is not appended here
+  eq(Boolean(lineOf(r.report, /^a: cloned, 1 skills, agent written \(pi, vibe, claude\)$/)), true);
   clean(f.root); clean(f.claude);
 });
 
@@ -1910,13 +1911,16 @@ test("install: claude home absent is skipped with one note, exit 0, directory no
 
 test("install: claudeHome undefined or null writes nothing under HOME and prints no claude: lines", () => {
   const home = tmp(); const saved = process.env.HOME; process.env.HOME = home;
+  fs.mkdirSync(path.join(home, ".claude/agents"), { recursive: true });      // a default would install here
   try {
     for (const arg of [undefined, null]) {
       const f = claudeFixture();
       const r = arg === undefined ? gen.runInstall(f.root, f.sp, f.vp, path.join(f.root, "pi-skills"))
         : gen.runInstall(f.root, f.sp, f.vp, path.join(f.root, "pi-skills"), null);
       eq(r.report.some(l => /^claude:/.test(l)), false);
-      eq(fs.existsSync(path.join(home, ".claude")), false);
+      eq(fs.readdirSync(path.join(home, ".claude/agents")).length, 0);
+      eq(fs.existsSync(path.join(home, ".claude/settings.json")), false);
+      eq(fs.existsSync(path.join(home, ".claude/skills")), false);
       clean(f.root); clean(f.claude);
     }
   } finally { process.env.HOME = saved; clean(home); }
@@ -2190,6 +2194,207 @@ test("syncClaudeSkills: a user file that only mentions the marker phrase is refu
   eq(r2.written.join(), "route-skill");
   eq(fs.readFileSync(path.join(home, "route-skill/SKILL.md"), "utf8"), src);
   clean(root); clean(path.dirname(home));
+});
+
+// ---- Follow-ups A ----
+test("syncClaudeSkills: no sources means no directory created and dirCreated false", () => {
+  const root = tmp(), home = path.join(tmp(), "skills");
+  const r = gen.syncClaudeSkills(root, home);
+  eq(r.dirCreated, false);
+  eq(fs.existsSync(home), false);
+  clean(root); clean(path.dirname(home));
+});
+
+test("syncClaudeSkills: only refused skills means dirCreated false for an existing dir and true only when it created one", () => {
+  const root = tmp(), base = tmp(), home = path.join(base, "skills");
+  w(root, "global-skills-claude/route-skill/SKILL.md", "---\nname: route-skill\n---\n\n" + gen.GLOBAL_SKILL_HEADER + " -->\n");
+  eq(gen.syncClaudeSkills(root, home).dirCreated, true);                  // created it
+  fs.writeFileSync(path.join(home, "route-skill/SKILL.md"), "mine\n");
+  eq(gen.syncClaudeSkills(root, home).dirCreated, false);                 // existed, refused
+  clean(root); clean(base);
+});
+
+test("status: a missing claude settings.json is stale with a warning naming the file", () => {
+  const { root, manifest } = statusFixture();
+  fs.mkdirSync(path.join(root, "global-skills-claude/route-skill"), { recursive: true });
+  fs.copyFileSync(path.join(gen.REPO_ROOT, "global-skills-claude/route-skill/SKILL.md"), path.join(root, "global-skills-claude/route-skill/SKILL.md"));
+  const claude = tmp();
+  gen.installClaudeAgents(root, path.join(claude, "agents"));
+  gen.syncClaudeSkills(root, path.join(claude, "skills"));
+  const r = gen.statusOf(root, manifest, { claudeHome: claude });
+  eq(r.claudeInstall, "stale");
+  eq(r.warnings.some(x => x.includes(path.join(claude, "settings.json")) && /missing/.test(x)), true);
+  clean(root); clean(claude);
+});
+
+test("claudeAgentsInstallState: owned orphans are not stale when no source is valid (the installer skips its prune then)", () => {
+  const root = tmp(), dest = path.join(tmp(), "agents");
+  claudeSrc(root, ["a"]);
+  gen.installClaudeAgents(root, dest);
+  fs.rmSync(path.join(root, "agents-claude"), { recursive: true });
+  eq(gen.claudeAgentsInstallState(root, dest).state, "in-sync");
+  eq(gen.installClaudeAgents(root, dest).pruned.length, 0);               // install agrees
+  clean(root); clean(path.dirname(dest));
+});
+
+test("claudeReadRules: a backslash in the checkout path is refused", () => {
+  const home = tmp(), base = tmp(); const weird = path.join(base, "we\\ird");
+  fs.mkdirSync(weird);
+  const r = gen.claudeReadRules(weird, home);
+  eq(r.rules.length, 0);
+  eq(/metachar/i.test(r.error), true);
+  clean(home); clean(base);
+});
+
+test("hasClaudeReadRules and mergeClaudePermissions: a rule written through a symlinked path is the same rule", () => {
+  const base = tmp(), home = tmp();
+  fs.mkdirSync(path.join(base, "real/sr"), { recursive: true });
+  fs.symlinkSync(path.join(base, "real"), path.join(base, "link"));
+  const { rules } = gen.claudeReadRules(path.join(base, "real/sr"), home);
+  const viaLink = rules.map(r => "Read(/" + path.join(base, "link/sr", r.includes("/skills/") ? "skills/**" : "catalog/**") + ")");
+  const sp = path.join(base, "settings.json");
+  fs.writeFileSync(sp, JSON.stringify({ permissions: { allow: viaLink } }));
+  eq(gen.hasClaudeReadRules(sp, rules, home), true);
+  const r = gen.mergeClaudePermissions(sp, rules, { home });
+  eq(r.changed, false);
+  eq(JSON.parse(fs.readFileSync(sp, "utf8")).permissions.allow.length, 2);   // no duplicate added
+  clean(base); clean(home);
+});
+
+test("hasClaudeReadRules: different directories are never equal, and an injected home is honoured for ~/ rules", () => {
+  const base = tmp(), H = tmp();
+  fs.mkdirSync(path.join(H, "x/skills"), { recursive: true });
+  fs.mkdirSync(path.join(base, "y/skills"), { recursive: true });
+  const sp = path.join(base, "settings.json");
+  fs.writeFileSync(sp, JSON.stringify({ permissions: { allow: ["Read(~/x/skills/**)"] } }));
+  const abs = "Read(/" + path.join(H, "x/skills/**") + ")";
+  eq(gen.hasClaudeReadRules(sp, [abs], H), true);                             // ~ expands with the injected home
+  eq(gen.hasClaudeReadRules(sp, [abs]), false);                               // real home: a different directory
+  eq(gen.hasClaudeReadRules(sp, ["Read(/" + path.join(base, "y/skills/**") + ")"], H), false);
+  clean(base); clean(H);
+});
+
+test("parseSkillFrontmatter: C1 control characters (NEL) in a description become spaces", () => {
+  const d = gen.parseSkillFrontmatter("---\nname: x\ndescription: a\u0085b\u0080c\u009fd\n---\n").description;
+  eq(d, "a b c d");
+  eq(/[\u0080-\u009f]/.test(d), false);
+});
+
+test("renderClaudeAgentFile: a NEL in a third-party skill description cannot reach the body rows", () => {
+  const root = tmp();
+  w(root, "skills/one/a/SKILL.md", "---\nname: a\ndescription: first\u0085second\n---\nbody\n");
+  const found = gen.discoverSkills(path.join(root, "skills/one"), E());
+  const out = gen.renderClaudeAgentFile(CE(), found.skills, { home: "/x" });
+  eq(/[\u0085]/.test(out), false);
+  eq(out.includes("- a: first second —"), true);
+  clean(root);
+});
+
+// ---- CLI ----
+test("runCli: status --no-claude skips the claude install and wins over a bad CLAUDE_CONFIG_DIR", () => {
+  const { root } = statusFixture(); const home = tmp();
+  const r = gen.runCli(["status", "--no-claude"], { CLAUDE_CONFIG_DIR: "rel" }, { root, home });
+  eq(r.exitCode, 0);
+  eq(r.out.join("\n").includes("claude install: n/a"), true);
+  clean(root); clean(home);
+});
+
+test("runCli: status with a bad CLAUDE_CONFIG_DIR exits 1 and shows the error", () => {
+  const { root } = statusFixture(); const home = tmp();
+  const r = gen.runCli(["status"], { CLAUDE_CONFIG_DIR: "rel/dir" }, { root, home });
+  eq(r.exitCode, 1);
+  const out = r.out.join("\n");
+  eq(out.includes("claude install: error"), true);
+  eq(out.includes("CLAUDE_CONFIG_DIR must be an absolute path"), true);
+  clean(root); clean(home);
+});
+
+test("runCli: status honours a valid CLAUDE_CONFIG_DIR", () => {
+  const { root } = statusFixture(); const home = tmp(); const cfg = tmp();
+  const r = gen.runCli(["status"], { CLAUDE_CONFIG_DIR: cfg }, { root, home });
+  eq(r.out.join("\n").includes("claude install: stale"), true);       // nothing installed there yet
+  clean(root); clean(home); clean(cfg);
+});
+
+function cliFixture() {
+  const f = claudeFixture(); const home = tmp();
+  fs.mkdirSync(path.join(home, ".claude/agents"), { recursive: true });
+  return { ...f, home, opts: { root: f.root, home, settingsPath: f.sp, vibeConfigPath: f.vp, skillsHome: path.join(f.root, "pi-skills") } };
+}
+
+test("runCli: install --no-claude writes nothing under an existing claude dir and says so", () => {
+  const f = cliFixture();
+  const r = gen.runCli(["install", "--no-claude"], {}, f.opts);
+  eq(r.exitCode, 0);
+  eq(r.out.includes("claude: skipped (--no-claude)"), true);
+  eq(fs.readdirSync(path.join(f.home, ".claude/agents")).length, 0);
+  eq(fs.existsSync(path.join(f.home, ".claude/settings.json")), false);
+  clean(f.root); clean(f.claude); clean(f.home);
+});
+
+test("runCli: install resolves the default <home>/.claude and installs there", () => {
+  const f = cliFixture();
+  const r = gen.runCli(["install"], {}, f.opts);
+  eq(r.exitCode, 0);
+  eq(fs.existsSync(path.join(f.home, ".claude/agents/a.md")), true);
+  clean(f.root); clean(f.claude); clean(f.home);
+});
+
+test("runCli: install with a bad CLAUDE_CONFIG_DIR exits 1 with the skip line and touches no claude dir", () => {
+  const f = cliFixture();
+  const r = gen.runCli(["install"], { CLAUDE_CONFIG_DIR: "rel" }, f.opts);
+  eq(r.exitCode, 1);
+  eq(r.out.some(l => /^claude: skipped \(CLAUDE_CONFIG_DIR must be an absolute path/.test(l)), true);
+  eq(fs.readdirSync(path.join(f.home, ".claude/agents")).length, 0);
+  clean(f.root); clean(f.claude); clean(f.home);
+});
+
+test("runCli: unknown command prints usage on err and exits 1", () => {
+  const r = gen.runCli(["frobnicate"], {}, { root: tmp(), home: tmp() });
+  eq(r.exitCode, 1);
+  eq(r.err.some(l => /usage: generate\.mjs/.test(l)), true);
+});
+
+test("installClaudeAgents: symlinked destination to an unmarked file is refused and the target untouched", () => {
+  const root = tmp(), base = tmp(), dest = path.join(base, "agents");
+  claudeSrc(root, ["a"]);
+  w(base, "dotfiles/a.md", "hand written\n");
+  fs.mkdirSync(dest, { recursive: true });
+  fs.symlinkSync(path.join(base, "dotfiles/a.md"), path.join(dest, "a.md"));
+  const r = gen.installClaudeAgents(root, dest);
+  eq(r.refused.join(), "a");
+  eq(fs.lstatSync(path.join(dest, "a.md")).isSymbolicLink(), true);
+  eq(fs.readFileSync(path.join(base, "dotfiles/a.md"), "utf8"), "hand written\n");
+  clean(root); clean(base);
+});
+
+test("mergeClaudePermissions: a same-size change with a different mtime mid-merge aborts without writing", () => {
+  const dir = tmp(); const sp = path.join(dir, "settings.json");
+  fs.writeFileSync(sp, '{"a":1}\n');
+  const r = gen.mergeClaudePermissions(sp, RULES, { onBeforeCommit: () => {
+    fs.writeFileSync(sp, '{"a":2}\n');                                          // same length
+    const t = new Date(Date.now() + 60000); fs.utimesSync(sp, t, t);
+  } });
+  eq(r.changed, false);
+  eq(/changed/.test(r.error), true);
+  eq(fs.readFileSync(sp, "utf8"), '{"a":2}\n');
+  clean(dir);
+});
+
+test("hasClaudeReadRules and mergeClaudePermissions: a single-slash rule is a different directory from the // absolute rule", () => {
+  const base = tmp(); fs.mkdirSync(path.join(base, "x/skills"), { recursive: true });
+  const real = fs.realpathSync(base);
+  const abs = "Read(/" + path.join(real, "x/skills/**") + ")";               // //abs form
+  const single = "Read(" + path.join(real, "x/skills/**") + ")";             // /abs form: relative to the settings dir in user settings
+  const sp = path.join(base, "settings.json");
+  fs.writeFileSync(sp, JSON.stringify({ permissions: { allow: [single] } }));
+  eq(gen.hasClaudeReadRules(sp, [abs]), false);
+  const r = gen.mergeClaudePermissions(sp, [abs]);
+  eq(r.changed, true);
+  eq(JSON.parse(fs.readFileSync(sp, "utf8")).permissions.allow.length, 2);
+  eq(gen.hasClaudeReadRules(sp, [abs]), true);
+  eq(gen.hasClaudeReadRules(sp, [single]), true);                             // and the single-slash rule still matches itself
+  clean(base);
 });
 
 process.exitCode = await (async () => {

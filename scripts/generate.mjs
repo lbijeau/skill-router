@@ -92,7 +92,7 @@ function normalizeDescription(val) {
   if (val == null) return null;
   const s = String(val)
     .replace(/\t/g, " ")
-    .replace(/[\u0000-\u0008\u000B-\u001F\u007F]/g, " ")
+    .replace(/[\u0000-\u0008\u000B-\u001F\u007F-\u009F]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
   if (s === "") return null;
@@ -699,7 +699,8 @@ export function claudeAgentsInstallState(root, agentsDir) {
     if (fs.readFileSync(dest, "utf8") !== src.content) details.push(`${src.stem}: installed copy differs`);
   }
   const known = new Set(sources.map(x => x.stem));
-  for (const f of fs.readdirSync(agentsDir)) {
+  // The installer prunes only when at least one source is valid; mirror that.
+  for (const f of valid.length ? fs.readdirSync(agentsDir) : []) {
     const m = f.match(/^(.*)\.md$/);
     if (m && !known.has(m[1]) && isOwnedClaudeAgent(path.join(agentsDir, f))) details.push(`${m[1]}: orphan`);
   }
@@ -712,7 +713,7 @@ export function claudeAgentsInstallState(root, agentsDir) {
 export function claudeReadRules(repoRoot, home = os.homedir()) {
   const real = realPath(path.resolve(repoRoot));
   const homeReal = realPath(path.resolve(home));
-  if (/[*?\[\]{}()]/.test(real)) {
+  if (/[*?\[\]{}()\\]/.test(real)) {
     return { rules: [], error: `checkout path contains rule metacharacters: ${real}` };
   }
   const base = real === homeReal || real.startsWith(homeReal + path.sep)
@@ -721,14 +722,20 @@ export function claudeReadRules(repoRoot, home = os.homedir()) {
   return { rules: [`Read(${base}/skills/**)`, `Read(${base}/catalog/**)`] };
 }
 
-// ~/ and // spellings of the same path compare equal.
-function normRule(rule) {
+// ~/ and // spellings of the same path compare equal, and the directory part
+// is resolved through symlinks (Claude Code matches on the resolved path).
+function normRule(rule, home = os.homedir()) {
   const m = String(rule).match(/^Read\((.*)\)$/);
   if (!m) return String(rule);
   let p = m[1];
-  if (p.startsWith("~/")) p = path.join(os.homedir(), p.slice(2));
+  if (p.startsWith("~/")) p = path.join(home, p.slice(2));
   else if (p.startsWith("//")) p = p.slice(1);
-  return `Read(${p})`;
+  else return `Read(${p})`;
+  const g = p.search(/[*?\[{]/);
+  const head = g < 0 ? p : p.slice(0, p.lastIndexOf("/", g));
+  // Canonical form is the // absolute spelling, so it never equals a single-slash
+  // rule (a different directory in user settings).
+  return `Read(/${realPath(head)}${p.slice(head.length)})`;
 }
 
 function claudeAllowList(parsed) {
@@ -736,8 +743,8 @@ function claudeAllowList(parsed) {
   return Array.isArray(allow) ? allow : [];
 }
 
-// `hooks.onBeforeCommit` is a test seam, called after the backup and before
-// the final re-check of the file.
+// `hooks.home` overrides the home used to expand `~/` rules; `hooks.onBeforeCommit`
+// is a test seam, called after the backup and before the final re-check.
 export function mergeClaudePermissions(settingsPath, rules, hooks = {}) {
   let target = settingsPath;
   const skip = (error) => ({ changed: false, added: [], error });
@@ -768,8 +775,8 @@ export function mergeClaudePermissions(settingsPath, rules, hooks = {}) {
     return skip("permissions.allow is not an array, merge skipped");
   }
   const list = claudeAllowList(existing);
-  const present = new Set(list.map(normRule));
-  const added = rules.filter(r => !present.has(normRule(r)));
+  const present = new Set(list.map(r => normRule(r, hooks.home)));
+  const added = rules.filter(r => !present.has(normRule(r, hooks.home)));
   if (added.length === 0) return { changed: false, added: [] };
   const next = { ...existing, permissions: { ...existing.permissions, allow: [...list, ...added] } };
   atomicWrite(target + ".bak", raw, 0o600);
@@ -782,11 +789,11 @@ export function mergeClaudePermissions(settingsPath, rules, hooks = {}) {
   return { changed: true, added };
 }
 
-export function hasClaudeReadRules(settingsPath, rules) {
+export function hasClaudeReadRules(settingsPath, rules, home) {
   let parsed;
   try { parsed = JSON.parse(fs.readFileSync(settingsPath, "utf8")); } catch { return false; }
-  const present = new Set(claudeAllowList(parsed).map(normRule));
-  return rules.every(r => present.has(normRule(r)));
+  const present = new Set(claudeAllowList(parsed).map(r => normRule(r, home)));
+  return rules.every(r => present.has(normRule(r, home)));
 }
 
 export const GLOBAL_SKILL_MARKER = "overwritten by skill-router install/update";
@@ -831,7 +838,7 @@ function skillDestStatus(skillsHome, src) {
 
 export function syncClaudeSkills(root, skillsHome) {
   const written = [], refused = [];
-  const dirCreated = !fs.existsSync(skillsHome);
+  const existed = fs.existsSync(skillsHome);
   for (const src of claudeSkillSources(root)) {
     const st = skillDestStatus(skillsHome, src);
     if (st === "refused") { refused.push(src.name); continue; }
@@ -841,7 +848,7 @@ export function syncClaudeSkills(root, skillsHome) {
     atomicWrite(path.join(dir, "SKILL.md"), src.content);
     written.push(src.name);
   }
-  return { written, refused, dirCreated };
+  return { written, refused, dirCreated: !existed && fs.existsSync(skillsHome) };
 }
 
 // A refused (user-owned) destination is not stale: install cannot fix it.
@@ -1227,6 +1234,7 @@ export function statusOf(root, manifest, opts = {}) {
       warnings.push(`claude: ${rr.error}`);
     } else if (!fs.existsSync(settingsFile)) {
       stale = true;
+      warnings.push(`claude: ${settingsFile} missing, allow rules not installed`);
     } else {
       let parseable = true;
       try { JSON.parse(fs.readFileSync(settingsFile, "utf8")); } catch { parseable = false; }
@@ -1355,12 +1363,14 @@ function runFlow(root, settingsPath, vibeConfigPath, mode, skillsHome, claudeHom
   }
   const piWritten = new Set(genResult.written);
   const vibeWritten = new Set(vibeResult.written);
+  const claudeWritten = new Set(claudeResult.written);
   for (const { entry, state } of states) {
     const found = discoverSkills(path.join(root, "skills", entry.name), entry);
     const names = found.skills.map(s => s.name);
     const targets = [];
     if (piWritten.has(entry.name)) targets.push("pi");
     if (vibeWritten.has(entry.name)) targets.push("vibe");
+    if (claudeWritten.has(entry.name)) targets.push("claude");
     report.push(`${entry.name}: ${state}, ${found.skills.length} skills, ` +
       (found.skills.length ? `agent written (${targets.join(", ")})` : "no agent"));
     if (mode === "update") {
@@ -1418,13 +1428,15 @@ function runClaudeInstall(root, claudeHome, report) {
   const skillsDir = path.join(claudeHome, "skills");
   const settingsFile = path.join(claudeHome, "settings.json");
   report.push(`claude: using ${claudeHome}`);
+  const agentsExisted = fs.existsSync(agentsDir);
+  const skillsExisted = fs.existsSync(skillsDir);
   // A filesystem error in one step (a file where a directory should be, a
   // dangling link, no permission) must not discard the rest of the report.
   const step = (label, fn) => {
     try { return fn(); }
     catch (e) { report.push(`claude: ${label} skipped (${e.message})`); return null; }
   };
-  const ia = step("agents install", () => {
+  step("agents install", () => {
     const r = installClaudeAgents(root, agentsDir);
     report.push(r.installed.length
       ? `claude: agents installed: ${r.installed.join(", ")}`
@@ -1435,7 +1447,6 @@ function runClaudeInstall(root, claudeHome, report) {
     }
     for (const x of r.invalid) report.push(`claude: invalid source ${x.name}: ${x.reason}`);
     if (r.pruneSkipped) report.push("claude: prune skipped (agents-claude/ has no valid agents)");
-    return r;
   });
   step("allow rules", () => {
     const rr = claudeReadRules(root);
@@ -1450,16 +1461,17 @@ function runClaudeInstall(root, claudeHome, report) {
         : "claude: allow rules already configured");
     }
   });
-  const sk = step("skills sync", () => {
+  step("skills sync", () => {
     const r = syncClaudeSkills(root, skillsDir);
     if (r.written.length) report.push(`claude: skills synced: ${r.written.join(", ")}`);
     for (const n of r.refused) report.push(`claude: refused skill ${n} (existing file was not generated by skill-router)`);
-    return r;
   });
-  if (ia?.dirCreated) {
+  // Decided from what is on disk afterwards, so a step that fails after creating
+  // the directory still gets its reminder.
+  if (!agentsExisted && fs.existsSync(agentsDir)) {
     report.push(`reminder: restart Claude Code once so it discovers the new ${agentsDir} directory (later updates load live)`);
   }
-  if (sk?.dirCreated) {
+  if (!skillsExisted && fs.existsSync(skillsDir)) {
     report.push(`reminder: run /reload-skills in Claude Code (or restart) to pick up ${skillsDir}`);
   }
 }
@@ -1487,34 +1499,48 @@ export function runUpdate(root, settingsPath, vibeConfigPath, skillsHome, claude
   return runFlow(root, settingsPath ?? DEFAULT_SETTINGS(), vibeConfigPath ?? DEFAULT_VIBE_CONFIG(), "update", skillsHome, claudeHome);
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
-  const cmd = process.argv[2];
+// The CLI as a function so it can be tested against a temp root and temp config
+// paths; `opts` = { root, home, settingsPath, vibeConfigPath, skillsHome }.
+export function runCli(argv, env, opts = {}) {
+  const root = opts.root ?? REPO_ROOT;
+  const cmd = argv[0];
+  const out = [], err = [];
   let claudeHome = null;
   let claudeError = null;
-  const noClaude = process.argv.includes("--no-claude");
+  const noClaude = argv.includes("--no-claude");
   if (!noClaude) {
-    const c = resolveClaudeHome(process.env, os.homedir());
+    const c = resolveClaudeHome(env, opts.home ?? os.homedir());
     if (c.error) claudeError = c.error;
     else claudeHome = c.dir;
   }
   try {
     if (cmd === "status") {
-      const st = printStatus(REPO_ROOT, loadManifest(REPO_ROOT), { claudeHome, claudeError });
-      console.log(st.output.trimEnd());
-      process.exit(st.exitCode);
+      const st = printStatus(root, loadManifest(root), { claudeHome, claudeError });
+      out.push(st.output.trimEnd());
+      return { exitCode: st.exitCode, out, err };
     }
     if (cmd === "install" || cmd === "update") {
-      const r = cmd === "install"
-        ? runInstall(REPO_ROOT, undefined, undefined, undefined, claudeHome)
-        : runUpdate(REPO_ROOT, undefined, undefined, undefined, claudeHome);
-      if (noClaude) console.log("claude: skipped (--no-claude)");
-      for (const line of r.report) console.log(line);
+      const run = cmd === "install" ? runInstall : runUpdate;
+      const r = run(root, opts.settingsPath, opts.vibeConfigPath, opts.skillsHome, claudeHome);
+      if (noClaude) out.push("claude: skipped (--no-claude)");
+      out.push(...r.report);
       if (claudeError) {
-        console.log(`claude: skipped (${claudeError})`);
-        process.exit(1);
+        out.push(`claude: skipped (${claudeError})`);
+        return { exitCode: 1, out, err };
       }
-      process.exit(r.exitCode);
+      return { exitCode: r.exitCode, out, err };
     }
-  } catch (e) { console.error(e.message); process.exit(1); }
-  console.error("usage: generate.mjs <install|update|status> [--no-claude]"); process.exit(1);
+  } catch (e) {
+    err.push(e.message);
+    return { exitCode: 1, out, err };
+  }
+  err.push("usage: generate.mjs <install|update|status> [--no-claude]");
+  return { exitCode: 1, out, err };
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+  const r = runCli(process.argv.slice(2), process.env);
+  for (const line of r.out) console.log(line);
+  for (const line of r.err) console.error(line);
+  process.exit(r.exitCode);
 }
