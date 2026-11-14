@@ -31,8 +31,11 @@ flowchart TD
    entries (same validation, name collisions are a load error); overlay
    entries generate local agents but stay out of the committed catalog.
    Single source of truth — see ADR-003.
-2. **Clone** — `install`/`update` shallow-clone each repo into
-   `skills/<name>/` (gitignored, never committed — ADR-002). `update` pulls
+2. **Clone** — `install`/`update` clone each repo into
+   `skills/<name>/` (gitignored, never committed — ADR-002). Pinned
+   entries (ADR-007) clone full history and check out the pinned commit;
+   `update` fetches and verifies but never moves a pin — upstream drift is
+   reported, not acted on. Unpinned entries shallow-clone and pull
    `--ff-only`; a failed pull leaves the clone as-is.
 3. **Discover** — `scripts/discover.mjs` walks each clone for directories
    containing `SKILL.md`, parses the frontmatter (`name`, `description`),
@@ -82,11 +85,16 @@ flowchart TD
    All writes are atomic with a `.bak` backup; forms the merger cannot
    merge safely are skipped and the exact manual remedy is printed.
 6. **Catalog + router** — `catalog/skill-catalog.md` (one bullet per skill,
-   rebuilt every run) and the `skill-router` agent, spawned by the global
-   `route-skill` pi skill. The router reads the catalog, opens the winning
+   rebuilt every run) and a generated `skill-router` agent on every target:
+   pi and Claude Code reach it through the global `route-skill` skill; Vibe
+   discovers it by its `description` (its discoverability is mechanically
+   confirmed but not yet probe-verified — re-check after Vibe upgrades).
+   The router reads the catalog, opens the winning
    `SKILL.md`, and returns the skill name, path, why it fits, and a digest —
-   the catalog's bulk never enters the calling session's context. Both are
-   derived artifacts, regenerated on every run; `status` reports them.
+   the catalog's bulk never enters the calling session's context. All are
+   derived artifacts, regenerated on every run; `status` reports them, and
+   CI fails the build if the committed ones drift from what the generator
+   produces.
 
 Renaming or removing a manifest entry prunes its agent files and clone on
 the next run; pruning only deletes files that look generated.
@@ -126,3 +134,9 @@ node scripts/test.mjs   # offline, fixture-based; no network needed
   never write user config destructively
 - [ADR-005](decisions/ADR-005-refuse-temp-dir-entries-in-persistent-settings.md)
   — refuse temp-dir entries in persistent pi settings
+- [ADR-006](decisions/ADR-006-per-repo-tool-policy-for-generated-agents.md)
+  — per-repo tool policy for generated agents
+- [ADR-007](decisions/ADR-007-sha-pinning-over-dry-run.md) — SHA pinning
+  over `--dry-run`
+- [ADR-008](decisions/ADR-008-anchor-flag-for-committed-generation.md)
+  — `--anchor` flag for committed-file generation

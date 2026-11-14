@@ -408,9 +408,10 @@ h2 {
         <p class="eyebrow">Departures</p>
         <h2 id="board-h">The pinned upstream repos</h2>
         <p>
-          Every row is a shallow clone with one generated agent per target,
-          restricted to exactly that repo's skills. Names link to the upstream
-          projects where one exists; their licenses are listed in ATTRIBUTIONS.md.
+          Every row is a clone pinned to a reviewed commit, with one generated
+          agent per target restricted to exactly that repo's skills. Names link
+          to the upstream projects where one exists; their licenses are listed
+          in ATTRIBUTIONS.md.
         </p>
       </div>
 
@@ -525,7 +526,7 @@ h2 {
         <li>
           <span class="stop-tag">Stop 02</span>
           <h3>Clone</h3>
-          <p>Each repo is shallow-cloned into <code>skills/&lt;name&gt;/</code> — gitignored, never committed. <code>update</code> pulls <code>--ff-only</code>; a failed pull leaves the clone as-is.</p>
+          <p>Each repo is cloned into <code>skills/&lt;name&gt;/</code> — gitignored, never committed. Pinned entries clone full history and check out the pinned commit; <code>update</code> fetches and verifies but never moves a pin. Unpinned entries shallow-clone and pull <code>--ff-only</code>.</p>
         </li>
         <li>
           <span class="stop-tag">Stop 03</span>
