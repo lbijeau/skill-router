@@ -1,7 +1,7 @@
 # Architecture
 
 skill-router turns pinned third-party skill repos into isolated per-repo
-agents for **pi**, **Mistral Vibe** and **Claude Code**, plus a catalog-driven
+agents for pi, Mistral Vibe and Claude Code, plus a catalog-driven
 router. Everything is derived from one manifest; nothing is configured twice.
 
 ## Pipeline
@@ -45,7 +45,7 @@ router. Everything is derived from one manifest; nothing is configured twice.
      `catalog/**`) into `~/.claude/settings.json` with a `.bak` copy.
    All writes are atomic with a `.bak` backup; forms the merger cannot
    merge safely are skipped and the exact manual remedy is printed.
-6. **Catalog + router** — `catalog/skill-catalog.md` (one row per skill,
+6. **Catalog + router** — `catalog/skill-catalog.md` (one bullet per skill,
    rebuilt every run) and the `skill-router` agent, spawned by the global
    `route-skill` pi skill. The router reads the catalog, opens the winning
    `SKILL.md`, and returns the skill name, path, why it fits, and a digest —

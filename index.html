@@ -92,11 +92,17 @@ h1 {
 .lede { margin-top: 1.1rem; font-size: 1.08rem; max-width: 34rem; color: var(--muted); }
 .lede strong { color: var(--ink); }
 .hero-stats {
-  display: flex; flex-wrap: wrap; gap: 1.6rem; margin-top: 1.6rem;
-  list-style: none; font-family: var(--font-mono); font-size: 0.82rem;
-  color: var(--muted);
+  display: flex; flex-wrap: wrap; gap: 0.6rem; margin-top: 1.6rem;
+  list-style: none;
 }
-.hero-stats b { display: block; font-size: 1.45rem; color: var(--ink); font-weight: 600; }
+.hero-stats li {
+  display: flex; align-items: baseline; gap: 0.4rem;
+  font-family: var(--font-mono); font-size: 0.74rem; font-weight: 600;
+  letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--board); background: var(--amber);
+  border-radius: 4px; padding: 0.35rem 0.65rem 0.3rem;
+}
+.hero-stats b { font-size: 1rem; font-weight: 700; }
 
 /* Install ticket ----------------------------------------------------------- */
 .ticket {
@@ -212,23 +218,26 @@ h2 {
 /* Route (pipeline) ----------------------------------------------------------- */
 .steps {
   list-style: none; display: grid; gap: 1.6rem;
-  grid-template-columns: repeat(3, 1fr); counter-reset: stop;
+  grid-template-columns: repeat(3, 1fr);
 }
 .steps li {
-  counter-increment: stop; border-top: 3px solid var(--ink);
-  padding-top: 1.5rem; position: relative;
+  border-top: 3px solid var(--ink); padding-top: 1.3rem; position: relative;
 }
 .steps li::before {
-  content: counter(stop, decimal-leading-zero);
-  position: absolute; top: -0.95rem; left: 0;
-  width: 1.9rem; height: 1.9rem; border-radius: 50%;
-  background: var(--ink); color: var(--concourse);
-  font-family: var(--font-mono); font-weight: 600; font-size: 0.78rem;
-  display: flex; align-items: center; justify-content: center;
+  content: ''; position: absolute; top: -3px; left: 0;
+  width: 1.6rem; height: 3px; background: var(--amber);
+}
+.stop-tag {
+  display: inline-flex; align-items: center; gap: 0.3rem;
+  font-family: var(--font-mono); font-weight: 600; font-size: 0.68rem;
+  letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--board); background: var(--amber);
+  border-radius: 3px; padding: 0.15rem 0.45rem 0.12rem;
+  margin-bottom: 0.55rem;
 }
 .steps h3 {
   font-family: var(--font-display); font-weight: 600; text-transform: uppercase;
-  font-size: 1.25rem; letter-spacing: 0.03em; margin-left: 2.4rem;
+  font-size: 1.25rem; letter-spacing: 0.03em;
 }
 .steps p { margin-top: 0.45rem; font-size: 0.92rem; color: var(--muted); }
 .steps code { font-family: var(--font-mono); font-size: 0.82em; color: var(--ink); }
@@ -313,8 +322,8 @@ h2 {
         <p class="lede">
           skill-router pins <strong>13 upstream skill repos</strong> and generates an
           <strong>isolated agent for each</strong> — for pi, Mistral Vibe and Claude Code —
-          so an agent behaves like its repo's author intended, not like your whole
-          catalog. A catalog-driven router picks the best skill across all of them
+          so every agent behaves like its own repo's author intended, independent of
+          your catalog. A catalog-driven router picks the best skill across all of them
           and returns only the recommendation.
         </p>
         <ul class="hero-stats">
@@ -395,13 +404,13 @@ h2 {
             <li class="board-row" style="--i:2">
               <span class="repo"><a href="https://github.com/ayghri/i-have-adhd">i-have-adhd</a></span>
               <span class="desc">ADHD-friendly execution: smallest next step, visible progress, momentum</span>
-              <span class="count" aria-label="1 skills">1</span>
+              <span class="count" aria-label="1 skill">1</span>
               <span class="status on" aria-label="Status: boarding">BOARDING</span>
             </li>
             <li class="board-row" style="--i:3">
               <span class="repo"><a href="https://github.com/cloudflare/security-audit-skill">security-audit</a></span>
               <span class="desc">Cloudflare's security-audit skill: threat-model and audit code</span>
-              <span class="count" aria-label="1 skills">1</span>
+              <span class="count" aria-label="1 skill">1</span>
               <span class="status on" aria-label="Status: boarding">BOARDING</span>
             </li>
             <li class="board-row" style="--i:4">
@@ -413,13 +422,13 @@ h2 {
             <li class="board-row" style="--i:5">
               <span class="repo"><a href="https://github.com/cathrynlavery/diagram-design">diagram-design</a></span>
               <span class="desc">Diagram design guidance for clear explanations</span>
-              <span class="count" aria-label="1 skills">1</span>
+              <span class="count" aria-label="1 skill">1</span>
               <span class="status on" aria-label="Status: boarding">BOARDING</span>
             </li>
             <li class="board-row" style="--i:6">
               <span class="repo"><a href="https://github.com/blader/humanizer">humanizer</a></span>
               <span class="desc">Rewrites AI-sounding prose so it reads like a person wrote it</span>
-              <span class="count" aria-label="1 skills">1</span>
+              <span class="count" aria-label="1 skill">1</span>
               <span class="status on" aria-label="Status: boarding">BOARDING</span>
             </li>
             <li class="board-row" style="--i:7">
@@ -437,25 +446,25 @@ h2 {
             <li class="board-row" style="--i:9">
               <span class="repo"><a href="https://github.com/pbakaus/impeccable">impeccable</a></span>
               <span class="desc">Impeccable: polish toward near-perfect software</span>
-              <span class="count" aria-label="1 skills">1</span>
+              <span class="count" aria-label="1 skill">1</span>
               <span class="status on" aria-label="Status: boarding">BOARDING</span>
             </li>
             <li class="board-row" style="--i:10">
               <span class="repo"><a href="https://github.com/wheresryan22/anatomy">anatomy</a></span>
               <span class="desc">Interactive isometric SVG/WebGL illustrations of machines and complex systems</span>
-              <span class="count" aria-label="1 skills">1</span>
+              <span class="count" aria-label="1 skill">1</span>
               <span class="status on" aria-label="Status: boarding">BOARDING</span>
             </li>
             <li class="board-row" style="--i:11">
               <span class="repo"><a href="https://github.com/Leonxlnx/taste-skill">taste-skill</a></span>
               <span class="desc">Design taste for coding agents: art direction, references, browser-checked pages</span>
-              <span class="count" aria-label="1 skills">1</span>
+              <span class="count" aria-label="1 skill">1</span>
               <span class="status on" aria-label="Status: boarding">BOARDING</span>
             </li>
             <li class="board-row" style="--i:12">
               <span class="repo"><a href="https://github.com/Nutlope/hallmark">hallmark</a></span>
               <span class="desc">Anti-AI-slop design skill: themed, goal-driven pages linted in a real browser</span>
-              <span class="count" aria-label="1 skills">1</span>
+              <span class="count" aria-label="1 skill">1</span>
               <span class="status on" aria-label="Status: boarding">BOARDING</span>
             </li>
             <li class="board-row" style="--i:13">
@@ -483,26 +492,32 @@ h2 {
       </div>
       <ol class="steps">
         <li>
+          <span class="stop-tag">Stop 01</span>
           <h3>Manifest</h3>
           <p><code>repos.json</code> holds one entry per repo: name, url, description, persona, plus optional <code>skillSource</code> / <code>pathExclude</code> curation — the single source of truth.</p>
         </li>
         <li>
+          <span class="stop-tag">Stop 02</span>
           <h3>Clone</h3>
           <p>Each repo is shallow-cloned into <code>skills/&lt;name&gt;/</code> — gitignored, never committed. <code>update</code> pulls <code>--ff-only</code>; a failed pull leaves the clone as-is.</p>
         </li>
         <li>
+          <span class="stop-tag">Stop 03</span>
           <h3>Discover</h3>
           <p>Every clone is walked for directories containing <code>SKILL.md</code>; frontmatter is parsed and the curation rules applied. Skills are deduped by name.</p>
         </li>
         <li>
+          <span class="stop-tag">Stop 04</span>
           <h3>Generate</h3>
           <p>One agent per repo, restricted to that repo's skills: pi markdown, Vibe TOML, Claude Code markdown. A repo with zero skills gets no agent — its entry is kept for later.</p>
         </li>
         <li>
+          <span class="stop-tag">Stop 05</span>
           <h3>Wire</h3>
           <p>Idempotent settings edits, always with a <code>.bak</code> backup: pi <code>agentScanDirs</code>, Vibe <code>agent_paths</code> plus read allowlist, Claude Code agents dir and two <code>Read</code> permissions.</p>
         </li>
         <li>
+          <span class="stop-tag">Stop 06</span>
           <h3>Catalog + router</h3>
           <p><code>catalog/skill-catalog.md</code> is rebuilt every run. The <code>route-skill</code> router reads it, opens the winning <code>SKILL.md</code>, and returns only the recommendation — the catalog's bulk never enters your session.</p>
         </li>

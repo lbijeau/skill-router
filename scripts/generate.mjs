@@ -13,6 +13,11 @@ export * from "./claude.mjs";
 
 const REQUIRED_FIELDS = ["url", "description", "persona"];
 
+// Generous ceiling for a single git clone/pull: long enough for a slow link,
+// short enough that a captive portal or dead remote doesn't hang install
+// forever.
+const GIT_TIMEOUT_MS = 300_000;
+
 const URL_RE = /^(https:\/\/[\w.-]+(?:\/[\w._~-]+)+\/?|file:\/\/\/[\w.~\/-]+)$/;
 
 function validateManifestEntry(entry, seen) {
@@ -677,12 +682,17 @@ export function statusOf(root, manifest, opts = {}) {
 
 export function printStatus(root, manifest, opts = {}) {
   const { rows, dropped, warnings, catalog, router, claudeRouter, claudeInstall, exitCode } = statusOf(root, manifest, opts);
+  // NAME column width tracks the longest name in play, with a 2-space gap, so
+  // a name as long as the old constant (e.g. "security-audit") doesn't glue
+  // straight into the next column.
+  const nameWidth = Math.max("NAME".length, ...rows.map(r => r.name.length)) + 2;
+  const otherWidths = [10, 7, 10, 10, 10];
   const lines = [
-    ["NAME", "CLONE", "SKILLS", "AGENT", "VIBE", "CLAUDE"].reduce((a, h, i) => a + h.padEnd([14, 10, 7, 10, 10, 10][i]), "") + "CATALOG    ROUTER",
-    " ".repeat(61) + catalog.padEnd(10) + router,
+    ["NAME", "CLONE", "SKILLS", "AGENT", "VIBE", "CLAUDE"].reduce((a, h, i) => a + h.padEnd(i === 0 ? nameWidth : otherWidths[i - 1]), "") + "CATALOG    ROUTER",
+    " ".repeat(nameWidth + otherWidths.reduce((a, b) => a + b, 0)) + catalog.padEnd(10) + router,
   ];
   for (const r of rows) {
-    lines.push(r.name.padEnd(14) + r.clone.padEnd(10) + String(r.skills).padEnd(7)
+    lines.push(r.name.padEnd(nameWidth) + r.clone.padEnd(10) + String(r.skills).padEnd(7)
       + r.agent.padEnd(10) + r.vibe.padEnd(10) + r.claude);
   }
   lines.push(`claude install: ${claudeInstall}`);
@@ -691,7 +701,7 @@ export function printStatus(root, manifest, opts = {}) {
   return { output: lines.join("\n") + "\n", exitCode };
 }
 
-function runFlow(root, mode, { settingsPath, vibeConfigPath, skillsHome, claudeHome }) {
+function runFlow(root, mode, { settingsPath, vibeConfigPath, skillsHome, claudeHome, gitTimeoutMs = GIT_TIMEOUT_MS }) {
   const manifest = loadManifest(root);
   const report = [];
   let anyFailed = false;
@@ -710,9 +720,11 @@ function runFlow(root, mode, { settingsPath, vibeConfigPath, skillsHome, claudeH
   for (const entry of manifest.repos) {
     const cloneDir = path.join(root, "skills", entry.name);
     const doClone = () => {
-      const r = spawnSync("git", ["clone", "--depth", "1", entry.url, cloneDir], { encoding: "utf8" });
+      const r = spawnSync("git", ["clone", "--depth", "1", entry.url, cloneDir], { encoding: "utf8", timeout: gitTimeoutMs });
       if (r.status !== 0) {
-        const last = (r.stderr || "git clone failed").trim().split("\n").pop();
+        const last = r.error?.code === "ETIMEDOUT"
+          ? `timed out after ${gitTimeoutMs / 1000}s`
+          : (r.stderr || "git clone failed").trim().split("\n").pop();
         report.push(`${entry.name}: clone failed (${last})`);
         failed.add(entry.name);
         anyFailed = true;
@@ -737,9 +749,12 @@ function runFlow(root, mode, { settingsPath, vibeConfigPath, skillsHome, claudeH
           if (!doClone()) continue;
           state = "cloned";
         } else {
-          const p = spawnSync("git", ["-C", cloneDir, "pull", "--ff-only"], { encoding: "utf8" });
+          const p = spawnSync("git", ["-C", cloneDir, "pull", "--ff-only"], { encoding: "utf8", timeout: gitTimeoutMs });
           if (p.status !== 0) {
-            report.push(`${entry.name}: pull failed (left as-is)`);
+            const reason = p.error?.code === "ETIMEDOUT"
+              ? `timed out after ${gitTimeoutMs / 1000}s`
+              : "left as-is";
+            report.push(`${entry.name}: pull failed (${reason})`);
             anyFailed = true;
           }
           state = cloneState(cloneDir) === "dirty" ? "reused (dirty)" : "reused";

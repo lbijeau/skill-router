@@ -1,7 +1,7 @@
 # skill-router
 
-One clean-room agent per third-party skills repo, for **pi**,
-**Mistral Vibe** and **Claude Code**. Each generated agent is restricted to
+One clean-room agent per third-party skills repo, for pi,
+Mistral Vibe and Claude Code. Each generated agent is restricted to
 exactly one repo's skills instead of your normal skill catalog, so the agent
 behaves like that repo's author intended. How complete that isolation is
 differs per tool; the Claude Code limits are listed under
@@ -42,6 +42,9 @@ Then:
 - `repos.json` is the manifest — the single source of truth: one entry per
   repo with `name`, `url`, `description`, `persona`, and optional
   `skillSource` / `pathExclude` curation.
+- The `description` and `persona` text in `repos.json` comes from the
+  upstream repo and is shown verbatim to the agents (in the generated agent
+  files and the catalog) — only pin repos you trust.
 - An optional `repos.local.json` next to it (gitignored, same `{ repos: [...] }`
   shape) overlays machine-local entries — e.g. a `file://` clone that only
   exists on this disk — without ever touching the committed manifest. Local
@@ -96,6 +99,23 @@ Then:
 - Removing or renaming a manifest entry prunes its agent file and clone on
   the next run.
 
+## Trust model
+
+- `update` runs `git pull --ff-only` on every clone — whatever upstream
+  pushed is live in the next regenerated agent and catalog, with no review
+  step in between. Skill bodies, descriptions and personas are re-pulled on
+  every update and shown verbatim to the agents that load them (see the
+  manifest note above) — only pin repos you trust.
+- `repos.json` pins a URL, not a commit. There is no SHA pinning or
+  diff-before-apply today; `update` assumes upstream acts in good faith
+  between pulls.
+- Claude Code agents are the only generated target with a tool allowlist
+  (`Read`, `Grep`, `Glob` — see
+  [Claude Code isolation](#claude-code-isolation)); pi and Vibe agents
+  inherit the host's full default tool set, shell and file write included.
+  Closing that gap is tracked separately (skill-router-yhj.14) and is out of
+  scope here.
+
 ## Code layout
 
 `scripts/generate.mjs` is the entry point and still re-exports everything, so
@@ -116,7 +136,7 @@ above it, never from below), which keeps the graph acyclic:
 `route-skill` is a global pi skill (synced to `~/.pi/agent/skills/route-skill/`)
 that routes a described situation to the best skill across **every** repo
 pinned in `repos.json`. It spawns the `skill-router` subagent, which reads the
-generated `catalog/skill-catalog.md` (one row per skill, rebuilt on every
+generated `catalog/skill-catalog.md` (one bullet per skill, rebuilt on every
 `install`/`update`), opens the winning `SKILL.md`, and returns the skill name,
 its path, why it fits, and a short digest. The catalog's bulk never enters the
 calling session's context; only the recommendation comes back. The caller then

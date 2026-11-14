@@ -67,9 +67,17 @@ export function routerBodyLines(root, home) {
   ];
 }
 
+// "wx" refuses to follow a pre-existing path (symlink or otherwise) at tmpf,
+// so a local attacker who pre-places one at the predictable tmp path gets an
+// EEXIST instead of us writing through it.
 export function atomicWrite(file, content, mode) {
   const tmpf = `${file}.tmp-${process.pid}`;
-  fs.writeFileSync(tmpf, content);
+  const fd = fs.openSync(tmpf, "wx");
+  try {
+    fs.writeFileSync(fd, content);
+  } finally {
+    fs.closeSync(fd);
+  }
   if (mode !== undefined) fs.chmodSync(tmpf, mode);
   fs.renameSync(tmpf, file);
 }

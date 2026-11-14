@@ -253,6 +253,39 @@ test("writeAgentFiles: writes, idempotent, removes zero-skill leftovers", () => 
   clean(root);
 });
 
+test("atomicWrite: writes content and renames into place", () => {
+  const root = tmp();
+  const file = path.join(root, "out.txt");
+  gen.atomicWrite(file, "hello");
+  eq(fs.readFileSync(file, "utf8"), "hello");
+  eq(fs.existsSync(`${file}.tmp-${process.pid}`), false);
+  clean(root);
+});
+
+test("atomicWrite: a pre-placed symlink at the tmp path is not followed", () => {
+  const root = tmp();
+  const file = path.join(root, "out.txt");
+  const tmpf = `${file}.tmp-${process.pid}`;
+  const target = path.join(root, "victim.txt");
+  fs.writeFileSync(target, "untouched");
+  fs.symlinkSync(target, tmpf);
+  assert.throws(() => gen.atomicWrite(file, "attacker content"), /EEXIST/);
+  eq(fs.readFileSync(target, "utf8"), "untouched");   // symlink target never written through
+  eq(fs.existsSync(file), false);                      // final file never created
+  clean(root);
+});
+
+test("atomicWrite: a pre-placed regular file at the tmp path is not truncated", () => {
+  const root = tmp();
+  const file = path.join(root, "out.txt");
+  const tmpf = `${file}.tmp-${process.pid}`;
+  fs.writeFileSync(tmpf, "pre-existing");
+  assert.throws(() => gen.atomicWrite(file, "attacker content"), /EEXIST/);
+  eq(fs.readFileSync(tmpf, "utf8"), "pre-existing");
+  eq(fs.existsSync(file), false);
+  clean(root);
+});
+
 test("tildePath: paths under home become ~-relative, others unchanged", () => {
   const home = "/fake/home";
   eq(gen.tildePath("/fake/home/repos/x/skills/a/SKILL.md", home), "~/repos/x/skills/a/SKILL.md");
@@ -576,6 +609,57 @@ test("install: not-a-repo clone dir is removed and re-cloned", () => {
   eq(r.exitCode, 0);
   eq(fs.existsSync(path.join(root, "skills/a/.git")), true);
   eq(fs.existsSync(path.join(root, "skills/a/junk.txt")), false);
+  clean(root);
+});
+
+test("install: a clone that outlives the timeout fails with a timeout message, not a hang", () => {
+  const root = tmp();
+  w(root, "repos.json", JSON.stringify({ repos: [
+    { name: "a", url: "file:///nope.git", description: "d", persona: "p" }]}));
+  const binDir = fs.mkdtempSync(path.join(os.tmpdir(), "sr-fakegit-"));
+  fs.writeFileSync(path.join(binDir, "git"), "#!/bin/sh\nsleep 2\n");
+  fs.chmodSync(path.join(binDir, "git"), 0o755);
+  const savedPath = process.env.PATH;
+  process.env.PATH = `${binDir}${path.delimiter}${savedPath}`;
+  try {
+    const r = gen.runInstall(root, { settingsPath: path.join(root, "settings.json"),
+      vibeConfigPath: path.join(root, "config.toml"), gitTimeoutMs: 100 });
+    eq(r.exitCode, 1);
+    eq(r.report.some(l => l === "a: clone failed (timed out after 0.1s)"), true);
+  } finally {
+    process.env.PATH = savedPath;
+    fs.rmSync(binDir, { recursive: true, force: true });
+  }
+  clean(root);
+});
+
+test("update: a pull that outlives the timeout fails with a timeout message, not a hang", () => {
+  const root = tmp(); const sp = path.join(root, "settings.json");
+  const vp = path.join(root, "config.toml");
+  const remote = bareRemote(root); remote.add(path.join("skills", "one"), "one");
+  w(root, "repos.json", JSON.stringify({ repos: [
+    { name: "a", url: remote.url, description: "d", persona: "p" }]}));
+  eq(gen.runInstall(root, { settingsPath: sp, vibeConfigPath: vp }).exitCode, 0);
+  const binDir = fs.mkdtempSync(path.join(os.tmpdir(), "sr-fakegit-"));
+  // Instant on "remote get-url" (so the url-changed check reads the real
+  // origin and takes the pull branch); sleeps past the timeout on "pull".
+  fs.writeFileSync(path.join(binDir, "git"), `#!/bin/sh
+if [ "$1" = "clone" ]; then sleep 2; exit 1; fi
+if [ "$3" = "remote" ]; then echo "${remote.url}"; exit 0; fi
+if [ "$3" = "pull" ]; then sleep 2; exit 1; fi
+exit 1
+`);
+  fs.chmodSync(path.join(binDir, "git"), 0o755);
+  const savedPath = process.env.PATH;
+  process.env.PATH = `${binDir}${path.delimiter}${savedPath}`;
+  try {
+    const r = gen.runUpdate(root, { settingsPath: sp, vibeConfigPath: vp, gitTimeoutMs: 100 });
+    eq(r.exitCode, 1);
+    eq(r.report.some(l => l === "a: pull failed (timed out after 0.1s)"), true);
+  } finally {
+    process.env.PATH = savedPath;
+    fs.rmSync(binDir, { recursive: true, force: true });
+  }
   clean(root);
 });
 
@@ -1555,13 +1639,37 @@ test("printStatus: catalog/router values align under their header columns", () =
   const lines = gen.printStatus(root, manifest).output.split("\n");
   const header = lines[0];
   const values = lines[1];
-  eq(header.indexOf("CLAUDE"), 51);
-  eq(header.indexOf("CATALOG"), 61);
-  eq(values.slice(0, 61).trim(), "");
-  eq(values.slice(61, 71).trim(), "in-sync");
-  eq(values.slice(71).trim(), "in-sync");
-  eq(lines[2].slice(51, 61).trim(), "in-sync");                       // claude column under its header
+  // NAME column width tracks the longest name ("one", here), not a constant.
+  const nameWidth = Math.max("NAME".length, "one".length) + 2;
+  const claudeStart = nameWidth + 10 + 7 + 10 + 10;
+  const catalogStart = claudeStart + 10;
+  eq(header.indexOf("CLAUDE"), claudeStart);
+  eq(header.indexOf("CATALOG"), catalogStart);
+  eq(values.slice(0, catalogStart).trim(), "");
+  eq(values.slice(catalogStart, catalogStart + 10).trim(), "in-sync");
+  eq(values.slice(catalogStart + 10).trim(), "in-sync");
+  eq(lines[2].slice(claudeStart, catalogStart).trim(), "in-sync");    // claude column under its header
   eq(lines[3], "claude install: n/a");                                // line after the data rows
+  clean(root);
+});
+
+test("printStatus: a name as wide as the old fixed column doesn't glue into CLONE", () => {
+  const root = tmp();
+  const name = "security-audit"; // 14 chars, exactly the old constant column width
+  const manifest = { repos: [
+    { name, url: "https://github.com/x/y", description: "d", persona: "p" }]};
+  w(root, "repos.json", JSON.stringify(manifest));
+  skill(root, `skills/${name}/a`);
+  gitRepo(path.join(root, "skills", name));
+  w(root, `agents/${name}.md`, gen.renderAgentFile(manifest.repos[0], ["a"]));
+  const found = gen.discoverSkills(path.join(root, "skills", name), manifest.repos[0]);
+  w(root, `agents-vibe/${name}.toml`, gen.renderVibeAgentTOML(manifest.repos[0], found.skills));
+  gen.writeSkillCatalog(root, manifest);
+  gen.writeRouterAgent(root); writeClaudeArtifacts(root, manifest);
+  const lines = gen.printStatus(root, manifest).output.split("\n");
+  const row = lines[2];
+  eq(row.startsWith(`${name} `), true);         // at least one space before the CLONE value
+  eq(row.slice(name.length).trimStart().startsWith("ok"), true); // clone state still readable, not glued
   clean(root);
 });
 
