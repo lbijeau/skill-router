@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "skill_router",
+  "project_id": "e098d6cb-3177-4e85-9c86-b27865626d0a"
+}
