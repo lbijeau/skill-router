@@ -323,8 +323,10 @@ h2 {
           skill-router pins <strong>13 upstream skill repos</strong> and generates an
           <strong>isolated agent for each</strong> — for pi, Mistral Vibe and Claude Code —
           so every agent behaves like its own repo's author intended, independent of
-          your catalog. A catalog-driven router picks the best skill across all of them
-          and returns only the recommendation.
+          your catalog, and that repo's skill content never piles into your own
+          session. A catalog-driven router picks the best skill across all of them
+          and returns only the recommendation, so the catalog's bulk never enters
+          your session either.
         </p>
         <ul class="hero-stats">
           <li><b>13</b>pinned repos</li>
@@ -524,7 +526,7 @@ h2 {
       <div class="section-head">
         <p class="eyebrow">Terminals</p>
         <h2 id="targets-h">Three targets, three kinds of clean room</h2>
-        <p>Each target receives its own generated artifacts. How complete the isolation is differs per tool.</p>
+        <p>Each target receives its own generated artifacts; skills are read as files inside the spawned agent, never loaded into your own session. How complete that isolation is differs per tool.</p>
       </div>
       <div class="targets">
         <article class="target">

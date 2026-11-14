@@ -3,12 +3,27 @@
 One clean-room agent per third-party skills repo, for pi,
 Mistral Vibe and Claude Code. Each generated agent is restricted to
 exactly one repo's skills instead of your normal skill catalog, so the agent
-behaves like that repo's author intended. How complete that isolation is
-differs per tool; the Claude Code limits are listed under
+behaves like that repo's author intended, and the skill content itself never
+reaches your main session. How complete that isolation is differs per tool;
+the Claude Code limits are listed under
 [Claude Code isolation](#claude-code-isolation).
 
 The pinned upstream projects and their licenses are listed in
 [ATTRIBUTIONS.md](ATTRIBUTIONS.md).
+
+## Why a clean room
+
+Skills are files on disk. A spawned per-repo agent reads its repo's
+`SKILL.md` files itself — your main session's context never sees the skill
+bodies, only the agent's answer. The router works the same way: it reads
+the catalog and hands back a recommendation (name, path, digest), not the
+catalog's bulk.
+
+The clean room is enforced, not aspirational. By default: pi agents get
+`inheritSkills: false` plus a read-only tools allowlist; Vibe agents get
+`disabled_tools = ["skill"]` plus an `enabled_tools` allowlist; Claude Code
+agents get `Read`, `Grep`, `Glob` only. Tool policy is set per repo — see
+[ADR-006](docs/decisions/ADR-006-per-repo-tool-policy-for-generated-agents.md).
 
 ## Quickstart
 
