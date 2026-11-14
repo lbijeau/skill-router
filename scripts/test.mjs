@@ -1453,7 +1453,9 @@ test("renderRouterAgent: frontmatter shape and persona body", () => {
 });
 
 test("renderRouterAgent: real home gets ~-anchored catalog path", () => {
-  const out = gen.renderRouterAgent();
+  // The scenario is a repo checked out under the home dir — construct it
+  // explicitly, so the test does not depend on where THIS checkout lives.
+  const out = gen.renderRouterAgent({ root: path.join(os.homedir(), "repositories", "skill-router") });
   eq(out.includes("~/repositories/skill-router/catalog/skill-catalog.md"), true);
 });
 
