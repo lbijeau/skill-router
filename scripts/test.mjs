@@ -1561,6 +1561,76 @@ test("writeRouterAgent: writes, idempotent", () => {
   clean(root);
 });
 
+test("writeVibeAgentFiles, writeClaudeAgentFiles, writeSkillCatalog, writeRouterAgent, writeClaudeRouterAgent: an anchor re-homes committed paths, not the real root", () => {
+  const H = tmp();
+  const root = path.join(H, "sr");                  // root is under H, never under the real os.homedir()
+  fs.mkdirSync(root, { recursive: true });
+  const manifest = { repos: [{ name: "a", url: "https://x/a", description: "d", persona: "p" }] };
+  w(root, "repos.json", JSON.stringify(manifest));
+  skill(root, "skills/a/one");
+
+  gen.writeVibeAgentFiles(root, manifest, new Set(), H);
+  eq(fs.readFileSync(path.join(root, "agents-vibe/a.toml"), "utf8").includes("~/sr/skills/a/one/SKILL.md"), true);
+
+  gen.writeClaudeAgentFiles(root, manifest, new Set(), H);
+  eq(fs.readFileSync(path.join(root, "agents-claude/a.md"), "utf8").includes("~/sr/skills/a/one/SKILL.md"), true);
+
+  gen.writeSkillCatalog(root, manifest, new Set(), H);
+  eq(fs.readFileSync(path.join(root, "catalog/skill-catalog.md"), "utf8").includes("~/sr/skills/a/one/SKILL.md"), true);
+
+  gen.writeRouterAgent(root, H);
+  eq(fs.readFileSync(path.join(root, "agents/skill-router.md"), "utf8").includes("~/sr/catalog/skill-catalog.md"), true);
+
+  gen.writeClaudeRouterAgent(root, H);
+  eq(fs.readFileSync(path.join(root, "agents-claude/skill-router.md"), "utf8").includes("~/sr/catalog/skill-catalog.md"), true);
+
+  // Without an anchor, the same root (not under the real home) falls back to
+  // the raw absolute path instead — no-anchor behavior is unchanged.
+  gen.writeVibeAgentFiles(root, manifest, new Set());
+  const noAnchor = fs.readFileSync(path.join(root, "agents-vibe/a.toml"), "utf8");
+  eq(noAnchor.includes("~/sr/skills"), false);
+  eq(noAnchor.includes(path.join(root, "skills/a/one/SKILL.md")), true);
+  clean(H);
+});
+
+test("runCli: install --anchor emits anchored paths in the committed artifacts but leaves local-config writes on the real root and home", () => {
+  const H = tmp();
+  const root = path.join(H, "sr");
+  fs.mkdirSync(root, { recursive: true });
+  const remote = bareRemote(root); remote.add(path.join("skills", "a"), "a");
+  w(root, "repos.json", JSON.stringify({ repos: [{ name: "a", url: remote.url, description: "d", persona: "p" }] }));
+  const sp = path.join(root, "settings.json"), vp = path.join(root, "config.toml");
+  const skillsHome = path.join(root, "pi-skills");
+  const r = gen.runCli(["install", "--anchor", H, "--no-claude"], {}, { root, home: H, settingsPath: sp, vibeConfigPath: vp, skillsHome });
+  eq(r.exitCode, 0, r.err.join("\n"));
+  eq(fs.readFileSync(path.join(root, "agents-vibe/a.toml"), "utf8").includes(`~/${path.relative(H, root)}/skills/a`), true);
+  eq(fs.readFileSync(path.join(root, "agents-claude/a.md"), "utf8").includes(`~/${path.relative(H, root)}/skills/a`), true);
+  eq(fs.readFileSync(path.join(root, "catalog/skill-catalog.md"), "utf8").includes(`~/${path.relative(H, root)}/skills/a`), true);
+  // mergeSettings always resolves the real root for its entry — ignores the anchor.
+  const settings = JSON.parse(fs.readFileSync(sp, "utf8"));
+  eq(settings.subagents.agentScanDirs[0], path.join(root, "agents"));
+  clean(H);
+});
+
+test("runCli: install without --anchor regenerates against the real root, unchanged from before --anchor existed", () => {
+  const root = tmp();
+  const remote = bareRemote(root); remote.add(path.join("skills", "a"), "a");
+  w(root, "repos.json", JSON.stringify({ repos: [{ name: "a", url: remote.url, description: "d", persona: "p" }] }));
+  const sp = path.join(root, "settings.json"), vp = path.join(root, "config.toml");
+  const skillsHome = path.join(root, "pi-skills");
+  const r = gen.runCli(["install", "--no-claude"], {}, { root, home: tmp(), settingsPath: sp, vibeConfigPath: vp, skillsHome });
+  eq(r.exitCode, 0, r.err.join("\n"));
+  eq(fs.readFileSync(path.join(root, "catalog/skill-catalog.md"), "utf8").includes(path.join(root, "skills/a")), true);
+  clean(root);
+});
+
+test("runCli: --anchor requires an absolute path argument", () => {
+  eq(gen.runCli(["install", "--anchor"], {}, {}).exitCode, 1);
+  eq(gen.runCli(["install", "--anchor"], {}, {}).err.some(l => /requires a path/.test(l)), true);
+  eq(gen.runCli(["install", "--anchor", "relative/path"], {}, {}).exitCode, 1);
+  eq(gen.runCli(["install", "--anchor", "relative/path"], {}, {}).err.some(l => /absolute path/.test(l)), true);
+});
+
 test("prune: never removes the skill-router agent", () => {
   const root = tmp();
   w(root, "repos.json", JSON.stringify({ repos: [
@@ -2619,6 +2689,56 @@ test("status: a missing claude settings.json is stale with a warning naming the 
   const r = gen.statusOf(root, manifest, { claudeHome: claude });
   eq(r.claudeInstall, "stale");
   eq(r.warnings.some(x => x.includes(path.join(claude, "settings.json")) && /missing/.test(x)), true);
+  clean(root); clean(claude);
+});
+
+test("claudeInstallStatus: an injected home is honoured for the allow-rules check, matching statusOf's threading", () => {
+  const H = tmp();
+  const root = path.join(H, "sr");
+  fs.mkdirSync(root, { recursive: true });
+  const claude = tmp();
+  const injectedRules = gen.claudeReadRules(root, H).rules;
+  eq(injectedRules.every(r => r.startsWith("Read(~/")), true);         // root is under H, so H-relative rules are tilde-anchored
+  w(claude, "settings.json", JSON.stringify({ permissions: { allow: injectedRules } }));
+  eq(gen.claudeInstallStatus(root, claude).state, "stale");             // no home: checked against the real home, mismatch
+  eq(gen.claudeInstallStatus(root, claude, H).state, "in-sync");        // home threaded through: same rules, match
+  clean(H); clean(claude);
+});
+
+test("statusOf: an injected home is forwarded to claudeInstallStatus, producing ~-anchored rules relative to it", () => {
+  const H = tmp();
+  const root = path.join(H, "sr");
+  fs.mkdirSync(root, { recursive: true });
+  w(root, "repos.json", JSON.stringify({ repos: [] }));
+  const manifest = gen.loadManifest(root);
+  const claude = tmp();
+  const injectedRules = gen.claudeReadRules(root, H).rules;
+  w(claude, "settings.json", JSON.stringify({ permissions: { allow: injectedRules } }));
+  eq(gen.statusOf(root, manifest, { claudeHome: claude }).claudeInstall, "stale");
+  eq(gen.statusOf(root, manifest, { claudeHome: claude, home: H }).claudeInstall, "in-sync");
+  clean(H); clean(claude);
+});
+
+test("runClaudeInstall: an injected home changes the rules mergeClaudePermissions writes to match that home", () => {
+  const H = tmp();
+  const root = path.join(H, "sr");
+  fs.mkdirSync(root, { recursive: true });
+  const claude = tmp();
+  const report = [];
+  gen.runClaudeInstall(root, claude, report, {}, H);
+  const written = JSON.parse(fs.readFileSync(path.join(claude, "settings.json"), "utf8")).permissions.allow;
+  eq(written.join(), gen.claudeReadRules(root, H).rules.join());
+  eq(written.every(r => r.startsWith("Read(~/")), true);
+  clean(H); clean(claude);
+});
+
+test("runClaudeInstall: omitting home preserves current behavior (falls back to the real home)", () => {
+  const root = tmp();
+  const claude = tmp();
+  const report = [];
+  gen.runClaudeInstall(root, claude, report);
+  const written = JSON.parse(fs.readFileSync(path.join(claude, "settings.json"), "utf8")).permissions.allow;
+  eq(written.join(), gen.claudeReadRules(root).rules.join());
   clean(root); clean(claude);
 });
 

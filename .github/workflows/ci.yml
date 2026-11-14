@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  test-and-check-generated:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Run test suite
+        run: node scripts/test.mjs
+
+      # Committed generated files (agents-vibe, agents-claude, catalog, the
+      # router agents) embed paths anchored at ~/repositories/skill-router
+      # (CONTRIBUTING.md, ADR-008). Regenerate from exactly that path,
+      # regardless of this runner's real $HOME, so a stale commit fails CI
+      # instead of only surfacing for whoever next runs install/update from
+      # the canonical location.
+      - name: Regenerate committed files at the canonical anchor and diff
+        run: |
+          set -e
+          mkdir -p "$HOME/repositories"
+          cp -r "$GITHUB_WORKSPACE" "$HOME/repositories/skill-router"
+          cd "$HOME/repositories/skill-router"
+          node scripts/generate.mjs install --anchor "$HOME/repositories/skill-router"
+          git diff --exit-code -- agents agents-vibe agents-claude catalog

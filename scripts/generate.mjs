@@ -216,7 +216,10 @@ export function writeAgentFiles(root, manifest, skip = new Set()) {
   return { written, removed, warnings, dropped };
 }
 
-export function writeVibeAgentFiles(root, manifest, skip = new Set()) {
+// `home` is the home directory used to ~-anchor skill paths in the generated
+// content, not the real install target; the --anchor CLI flag threads a
+// fixed canonical value in here for committed-file generation (see ADR-008).
+export function writeVibeAgentFiles(root, manifest, skip = new Set(), home) {
   const agentsDir = path.join(root, "agents-vibe");
   fs.mkdirSync(agentsDir, { recursive: true });
   const written = [], removed = [];
@@ -225,7 +228,7 @@ export function writeVibeAgentFiles(root, manifest, skip = new Set()) {
     const found = discoverSkills(path.join(root, "skills", entry.name), entry);
     const file = path.join(agentsDir, `${entry.name}.toml`);
     if (found.skills.length > 0) {
-      fs.writeFileSync(file, renderVibeAgentTOML(entry, found.skills));
+      fs.writeFileSync(file, renderVibeAgentTOML(entry, found.skills, { home }));
       written.push(entry.name);
     } else if (fs.existsSync(file)) {
       fs.rmSync(file);
@@ -268,11 +271,11 @@ export function renderRouterAgent({ root = REPO_ROOT, home } = {}) {
   ].join("\n");
 }
 
-export function writeRouterAgent(root) {
+export function writeRouterAgent(root, home) {
   const agentsDir = path.join(root, "agents");
   fs.mkdirSync(agentsDir, { recursive: true });
   const file = path.join(agentsDir, `${ROUTER_AGENT_NAME}.md`);
-  fs.writeFileSync(file, renderRouterAgent({ root }));
+  fs.writeFileSync(file, renderRouterAgent({ root, home }));
   return { file, written: true };
 }
 
@@ -321,8 +324,8 @@ export function renderSkillCatalog(root, manifest, { home, skip } = {}) {
   return parts.join("\n");
 }
 
-export function writeSkillCatalog(root, manifest, skip = new Set()) {
-  const content = renderSkillCatalog(root, manifest, { skip });
+export function writeSkillCatalog(root, manifest, skip = new Set(), home) {
+  const content = renderSkillCatalog(root, manifest, { skip, home });
   let skillCount = 0;
   for (const entry of manifest.repos) {
     if (entry.local || skip.has(entry.name)) continue;
@@ -726,7 +729,7 @@ export function statusOf(root, manifest, opts = {}) {
     claudeInstall = STATE.ERROR;
   }
   if (claudeHome && fs.existsSync(claudeHome)) {
-    const r = claudeInstallStatus(root, claudeHome);
+    const r = claudeInstallStatus(root, claudeHome, opts.home);
     claudeInstall = r.state;
     warnings.push(...r.warnings);
   }
@@ -758,7 +761,11 @@ export function printStatus(root, manifest, opts = {}) {
   return { output: lines.join("\n") + "\n", exitCode };
 }
 
-function runFlow(root, mode, { settingsPath, vibeConfigPath, skillsHome, claudeHome, gitTimeoutMs = GIT_TIMEOUT_MS }) {
+// `anchor`, when set, is the fixed home directory used only to ~-anchor paths
+// in the committed generated files (agents-vibe, agents-claude, the catalog,
+// and the router agents) — never the real root or real home used for the
+// settings/Vibe-config/Claude-install steps below. See ADR-008.
+function runFlow(root, mode, { settingsPath, vibeConfigPath, skillsHome, claudeHome, gitTimeoutMs = GIT_TIMEOUT_MS, anchor }) {
   const manifest = loadManifest(root);
   const report = [];
   let anyFailed = false;
@@ -887,20 +894,20 @@ function runFlow(root, mode, { settingsPath, vibeConfigPath, skillsHome, claudeH
     if (entry.local && !failed.has(entry.name))
       report.push(`${entry.name}: local overlay entry — generated agent files are machine-local, do not commit them`);
   }
-  const vibeResult = writeVibeAgentFiles(root, manifest, failed);
+  const vibeResult = writeVibeAgentFiles(root, manifest, failed, anchor);
   for (const name of vibeResult.removed) {
     report.push(`${name}: 0 skills, removed stale vibe agent`);
   }
-  const claudeResult = writeClaudeAgentFiles(root, manifest, failed);
+  const claudeResult = writeClaudeAgentFiles(root, manifest, failed, anchor);
   for (const warn of claudeResult.warnings) report.push(warn);
   for (const name of claudeResult.removed) {
     report.push(`${name}: 0 skills, removed stale claude agent`);
   }
-  const catalogResult = writeSkillCatalog(root, manifest, failed);
+  const catalogResult = writeSkillCatalog(root, manifest, failed, anchor);
   report.push(`catalog: ${catalogResult.skillCount} skills written to catalog/skill-catalog.md`);
-  writeRouterAgent(root);
+  writeRouterAgent(root, anchor);
   report.push(`router agent: ${ROUTER_AGENT_NAME} written to agents/${ROUTER_AGENT_NAME}.md`);
-  writeClaudeRouterAgent(root);
+  writeClaudeRouterAgent(root, anchor);
   report.push(`claude router agent: ${ROUTER_AGENT_NAME} written to agents-claude/${ROUTER_AGENT_NAME}.md`);
   const synced = syncGlobalSkills(root, skillsHome);
   for (const f of synced.written) {
@@ -966,13 +973,16 @@ const DEFAULT_SETTINGS = () => path.join(os.homedir(), ".pi/agent/settings.json"
 
 const DEFAULT_VIBE_CONFIG = () => path.join(process.env.VIBE_HOME || path.join(os.homedir(), ".vibe"), "config.toml");
 
-// `paths` = { settingsPath, vibeConfigPath, skillsHome, claudeHome }. The first
-// two default to the real pi and Vibe config; `skillsHome` defaults to the pi
-// skills dir; `claudeHome` null/undefined skips the Claude install step
-// (generation of agents-claude/ still runs). Only the CLI computes a Claude default.
+// `paths` = { settingsPath, vibeConfigPath, skillsHome, claudeHome, anchor }. The
+// first two default to the real pi and Vibe config; `skillsHome` defaults to
+// the pi skills dir; `claudeHome` null/undefined skips the Claude install step
+// (generation of agents-claude/ still runs). Only the CLI computes a Claude
+// default. `anchor`, when set, only re-homes the committed generated files
+// (ADR-008) — it never reaches settingsPath/vibeConfigPath/claudeHome's real
+// paths.
 function flowPaths(paths) {
   if (paths === null || typeof paths !== "object" || Array.isArray(paths)) {
-    throw new TypeError("runInstall/runUpdate take (root, { settingsPath, vibeConfigPath, skillsHome, claudeHome })");
+    throw new TypeError("runInstall/runUpdate take (root, { settingsPath, vibeConfigPath, skillsHome, claudeHome, anchor })");
   }
   return { ...paths,
     settingsPath: paths.settingsPath ?? DEFAULT_SETTINGS(),
@@ -992,6 +1002,20 @@ export function runCli(argv, env, opts = {}) {
   let claudeHome = null;
   let claudeError = null;
   const noClaude = argv.includes("--no-claude");
+  // --anchor <path>: a fixed canonical home used only to ~-anchor paths in the
+  // committed generated files (install/update), regardless of the real root
+  // or real home — see CONTRIBUTING.md's checkout-location workaround and
+  // ADR-008. It never reaches settings/Vibe-config/Claude-install, which
+  // always resolve the real root and real home.
+  const anchorIdx = argv.indexOf("--anchor");
+  let anchor;
+  if (anchorIdx !== -1) {
+    anchor = argv[anchorIdx + 1];
+    if (!anchor || !path.isAbsolute(anchor)) {
+      err.push(anchor ? `--anchor must be an absolute path: ${anchor}` : "--anchor requires a path argument");
+      return { exitCode: 1, out, err };
+    }
+  }
   if (!noClaude && (cmd === "status" || cmd === "install" || cmd === "update")) {
     const c = resolveClaudeHome(env, opts.home ?? os.homedir());
     if (c.error) claudeError = c.error;
@@ -1037,7 +1061,7 @@ export function runCli(argv, env, opts = {}) {
       }
       const run = cmd === "install" ? runInstall : runUpdate;
       const r = run(root, { settingsPath: opts.settingsPath, vibeConfigPath: opts.vibeConfigPath,
-        skillsHome: opts.skillsHome, claudeHome });
+        skillsHome: opts.skillsHome, claudeHome, anchor });
       if (noClaude) out.push("claude: skipped (--no-claude)");
       out.push(...r.report);
       if (claudeError) {
@@ -1050,7 +1074,7 @@ export function runCli(argv, env, opts = {}) {
     err.push(e.message);
     return { exitCode: 1, out, err };
   }
-  err.push("usage: generate.mjs <install|update|status|pin [name]> [--no-claude]");
+  err.push("usage: generate.mjs <install|update|status|pin [name]> [--no-claude] [--anchor <path>]");
   return { exitCode: 1, out, err };
 }
 

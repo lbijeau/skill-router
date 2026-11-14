@@ -26,6 +26,27 @@ git config core.hooksPath hooks   # gitleaks pre-commit (or copy hooks/pre-commi
 The pre-commit hook runs `gitleaks protect --staged` and refuses to commit
 without it. `brew install gitleaks` if it is missing.
 
+**Clone at exactly `~/repositories/skill-router`.** The committed generated
+files (`agents-vibe/`, `agents-claude/`, `catalog/skill-catalog.md`, and the
+router agents) embed `~`-anchored paths to this checkout, computed from the
+real home directory at generation time (see ADR-008). Running `install` or
+`update` from any other checkout root — even one still under `$HOME` —
+computes a different path string than what is committed, so the generated
+files come out dirty in `git status` even though nothing meaningful changed.
+There is no code-level enforcement of the canonical location; this is a
+workaround, not a requirement the tool checks. CI regenerates from the
+canonical location (via `--anchor`, see below) and fails if the committed
+files are stale, so a PR built from a non-canonical checkout will fail CI
+unless you regenerate with `--anchor ~/repositories/skill-router` yourself
+before committing.
+
+If you can't work from that exact path, run `node scripts/generate.mjs
+install --anchor ~/repositories/skill-router` (or `update`) to regenerate the
+committed files anchored at the canonical location regardless of where your
+checkout actually lives; `--anchor` only affects paths embedded in those
+committed files; it never changes where your local pi/Vibe/Claude config
+gets written, which always targets your real home directory.
+
 ## What changes look like
 
 - **Code**: one commit per coherent change, terse subject line, body that
