@@ -68,6 +68,23 @@ test("loadManifest rejects missing required fields", () => {
   }
 });
 
+test("loadManifest accepts a valid pin and rejects bad hex or out-of-range lengths", () => {
+  const root = tmp();
+  w(root, "repos.json", JSON.stringify({ repos: [
+    { name: "a", url: "https://github.com/x/y", description: "d", persona: "p",
+      pin: "1234567890abcdef1234567890abcdef12345678" } ]}));
+  eq(gen.loadManifest(root).repos[0].pin, "1234567890abcdef1234567890abcdef12345678");
+  clean(root);
+  for (const bad of ["xyz1234", "123456", "1".repeat(41), "", 123]) {
+    const r2 = tmp();
+    w(r2, "repos.json", JSON.stringify({ repos: [
+      { name: "a", url: "https://github.com/x/y", description: "d", persona: "p", pin: bad } ]}));
+    assert.throws(() => gen.loadManifest(r2), /a: pin must be a commit SHA, hex, 7-40 characters/,
+      `expected ${JSON.stringify(bad)} to be rejected`);
+    clean(r2);
+  }
+});
+
 test("globToRegExp: ** crosses segments, * does not", () => {
   const re = gen.globToRegExp("skills/in-progress/**");
   eq(re.test("skills/in-progress/a"), true);
@@ -689,6 +706,79 @@ test("update: pull --ff-only picks up new skills and reports deltas", () => {
   eq(r.report.filter(l => /a: \+1 \(two\)/.test(l)).length, 1);
   eq(fs.readFileSync(path.join(root, "agents/a.md"), "utf8"),
      gen.renderAgentFile({ name: "a", description: "d", persona: "p" }, ["one", "two"]));
+  clean(root);
+});
+
+test("install: with a pin, the clone checks out the pinned commit, not the upstream tip, and reports drift", () => {
+  const root = tmp(); const sp = path.join(root, "settings.json");
+  const vp = path.join(root, "config.toml");
+  const remote = bareRemote(root);
+  remote.add(path.join("skills", "one"), "one");
+  const pin = spawnSync("git", ["-C", path.join(root, "work"), "rev-parse", "HEAD"], { encoding: "utf8" }).stdout.trim();
+  remote.add(path.join("skills", "two"), "two");           // upstream moves past the pin
+  const tip = spawnSync("git", ["-C", path.join(root, "work"), "rev-parse", "HEAD"], { encoding: "utf8" }).stdout.trim();
+  w(root, "repos.json", JSON.stringify({ repos: [
+    { name: "a", url: remote.url, description: "d", persona: "p", pin } ]}));
+  const r = gen.runInstall(root, { settingsPath: sp, vibeConfigPath: vp });
+  eq(r.exitCode, 0);
+  eq(spawnSync("git", ["-C", path.join(root, "skills/a"), "rev-parse", "HEAD"], { encoding: "utf8" }).stdout.trim(), pin);
+  eq(fs.existsSync(path.join(root, "skills/a/skills/one/SKILL.md")), true);
+  eq(fs.existsSync(path.join(root, "skills/a/skills/two/SKILL.md")), false);
+  eq(fs.readFileSync(path.join(root, "agents/a.md"), "utf8"),
+     gen.renderAgentFile({ name: "a", description: "d", persona: "p" }, ["one"]));
+  eq(r.report.some(l => l === `a: pin ${pin} is behind upstream HEAD ${tip.slice(0, 12)} (bump the pin in repos.json to move it)`), true);
+  clean(root);
+});
+
+test("update: a pinned clone never silently moves to upstream HEAD; bumping the pin in repos.json moves it", () => {
+  const root = tmp(); const sp = path.join(root, "settings.json");
+  const vp = path.join(root, "config.toml");
+  const remote = bareRemote(root);
+  remote.add(path.join("skills", "one"), "one");
+  const pin = spawnSync("git", ["-C", path.join(root, "work"), "rev-parse", "HEAD"], { encoding: "utf8" }).stdout.trim();
+  w(root, "repos.json", JSON.stringify({ repos: [
+    { name: "a", url: remote.url, description: "d", persona: "p", pin } ]}));
+  eq(gen.runInstall(root, { settingsPath: sp, vibeConfigPath: vp }).exitCode, 0);
+  remote.add(path.join("skills", "two"), "two");           // upstream advances past the pin
+  const tip = spawnSync("git", ["-C", path.join(root, "work"), "rev-parse", "HEAD"], { encoding: "utf8" }).stdout.trim();
+  const r1 = gen.runUpdate(root, { settingsPath: sp, vibeConfigPath: vp });
+  eq(r1.exitCode, 0);
+  eq(spawnSync("git", ["-C", path.join(root, "skills/a"), "rev-parse", "HEAD"], { encoding: "utf8" }).stdout.trim(), pin);
+  eq(fs.existsSync(path.join(root, "skills/a/skills/two/SKILL.md")), false);
+  eq(r1.report.some(l => l === `a: pin ${pin} is behind upstream HEAD ${tip.slice(0, 12)} (bump the pin in repos.json to move it)`), true);
+  // Maintainer reviews and bumps the pin: only then does the clone move.
+  w(root, "repos.json", JSON.stringify({ repos: [
+    { name: "a", url: remote.url, description: "d", persona: "p", pin: tip } ]}));
+  const r2 = gen.runUpdate(root, { settingsPath: sp, vibeConfigPath: vp });
+  eq(r2.exitCode, 0);
+  eq(spawnSync("git", ["-C", path.join(root, "skills/a"), "rev-parse", "HEAD"], { encoding: "utf8" }).stdout.trim(), tip);
+  eq(fs.existsSync(path.join(root, "skills/a/skills/two/SKILL.md")), true);
+  eq(r2.report.some(l => /pin .* is behind upstream HEAD/.test(l)), false);
+  clean(root);
+});
+
+test("install/update: an entry without a pin keeps today's pull --ff-only behavior; a pinned sibling stays put", () => {
+  const root = tmp(); const sp = path.join(root, "settings.json");
+  const vp = path.join(root, "config.toml");
+  const pinnedRoot = path.join(root, "pinned-remote"); fs.mkdirSync(pinnedRoot, { recursive: true });
+  const pinnedRemote = bareRemote(pinnedRoot);
+  pinnedRemote.add(path.join("skills", "one"), "one");
+  const pin = spawnSync("git", ["-C", path.join(pinnedRoot, "work"), "rev-parse", "HEAD"], { encoding: "utf8" }).stdout.trim();
+  const freeRoot = path.join(root, "free-remote"); fs.mkdirSync(freeRoot, { recursive: true });
+  const freeRemote = bareRemote(freeRoot);
+  freeRemote.add(path.join("skills", "one"), "one");
+  w(root, "repos.json", JSON.stringify({ repos: [
+    { name: "pinned", url: pinnedRemote.url, description: "d", persona: "p", pin },
+    { name: "free", url: freeRemote.url, description: "d", persona: "p" } ]}));
+  eq(gen.runInstall(root, { settingsPath: sp, vibeConfigPath: vp }).exitCode, 0);
+  freeRemote.add(path.join("skills", "two"), "two");
+  const r = gen.runUpdate(root, { settingsPath: sp, vibeConfigPath: vp });
+  eq(r.exitCode, 0);
+  // Unpinned: pull --ff-only tracks upstream HEAD, same as before this change.
+  eq(fs.existsSync(path.join(root, "skills/free/skills/two/SKILL.md")), true);
+  eq(r.report.some(l => /free: \+1 \(two\)/.test(l)), true);
+  // Pinned: stays exactly at the pin.
+  eq(spawnSync("git", ["-C", path.join(root, "skills/pinned"), "rev-parse", "HEAD"], { encoding: "utf8" }).stdout.trim(), pin);
   clean(root);
 });
 
@@ -2652,6 +2742,45 @@ test("runCli: install with a bad CLAUDE_CONFIG_DIR exits 1 with the skip line an
   eq(r.out.some(l => /^claude: skipped \(CLAUDE_CONFIG_DIR must be an absolute path/.test(l)), true);
   eq(fs.readdirSync(path.join(f.home, ".claude/agents")).length, 0);
   clean(f.root); clean(f.claude); clean(f.home);
+});
+
+test("runCli: pin with no name prints the current upstream HEAD SHA for every repo", () => {
+  const root = tmp();
+  const aRoot = path.join(root, "a-remote"); fs.mkdirSync(aRoot, { recursive: true });
+  const a = bareRemote(aRoot); a.add(path.join("skills", "one"), "one");
+  const aHead = spawnSync("git", ["-C", path.join(aRoot, "work"), "rev-parse", "HEAD"], { encoding: "utf8" }).stdout.trim();
+  const bRoot = path.join(root, "b-remote"); fs.mkdirSync(bRoot, { recursive: true });
+  const b = bareRemote(bRoot); b.add(path.join("skills", "one"), "one");
+  const bHead = spawnSync("git", ["-C", path.join(bRoot, "work"), "rev-parse", "HEAD"], { encoding: "utf8" }).stdout.trim();
+  w(root, "repos.json", JSON.stringify({ repos: [
+    { name: "a", url: a.url, description: "d", persona: "p" },
+    { name: "b", url: b.url, description: "d", persona: "p" } ]}));
+  const r = gen.runCli(["pin"], {}, { root });
+  eq(r.exitCode, 0);
+  eq(r.out.includes(`a ${aHead}`), true);
+  eq(r.out.includes(`b ${bHead}`), true);
+});
+
+test("runCli: pin <name> prints only that repo's upstream HEAD SHA", () => {
+  const root = tmp();
+  const aRoot = path.join(root, "a-remote"); fs.mkdirSync(aRoot, { recursive: true });
+  const a = bareRemote(aRoot); a.add(path.join("skills", "one"), "one");
+  const aHead = spawnSync("git", ["-C", path.join(aRoot, "work"), "rev-parse", "HEAD"], { encoding: "utf8" }).stdout.trim();
+  w(root, "repos.json", JSON.stringify({ repos: [
+    { name: "a", url: a.url, description: "d", persona: "p" } ]}));
+  const r = gen.runCli(["pin", "a"], {}, { root });
+  eq(r.exitCode, 0);
+  eq(r.out.length, 1);
+  eq(r.out[0], `a ${aHead}`);
+});
+
+test("runCli: pin <unknown-name> is an error, exit 1", () => {
+  const root = tmp();
+  w(root, "repos.json", JSON.stringify({ repos: [
+    { name: "a", url: "https://github.com/x/y", description: "d", persona: "p" } ]}));
+  const r = gen.runCli(["pin", "nope"], {}, { root });
+  eq(r.exitCode, 1);
+  eq(r.err.some(l => /pin: unknown repo "nope"/.test(l)), true);
 });
 
 test("runCli: unknown command prints usage on err and exits 1", () => {

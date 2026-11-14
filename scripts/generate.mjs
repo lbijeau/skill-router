@@ -20,6 +20,11 @@ const GIT_TIMEOUT_MS = 300_000;
 
 const URL_RE = /^(https:\/\/[\w.-]+(?:\/[\w._~-]+)+\/?|file:\/\/\/[\w.~\/-]+)$/;
 
+// A commit SHA, full or abbreviated; git accepts unambiguous prefixes down to
+// 4 chars but we require 7 (git's own default abbreviation length) as the
+// floor for a reviewed manifest pin.
+const PIN_RE = /^[0-9a-f]{7,40}$/i;
+
 // Per-repo trust decision for the generated pi/Vibe agents: "read-only"
 // (default) gets the hardened allowlist below; "full" keeps today's
 // full-tool-set behavior for personas whose skills genuinely edit files or run
@@ -52,6 +57,11 @@ function validateManifestEntry(entry, seen) {
     const src = path.normalize(entry.skillSource);
     if (path.isAbsolute(src) || src.split(/[\\/]+/).includes("..")) {
       throw new Error(`${entry.name}: skillSource must be a relative path inside the clone`);
+    }
+  }
+  if (entry.pin !== undefined) {
+    if (typeof entry.pin !== "string" || !PIN_RE.test(entry.pin)) {
+      throw new Error(`${entry.name}: pin must be a commit SHA, hex, 7-40 characters`);
     }
   }
   if (seen.has(entry.name)) {
@@ -764,10 +774,40 @@ function runFlow(root, mode, { settingsPath, vibeConfigPath, skillsHome, claudeH
   }
   const states = [];
   const failed = new Set();
+  // A pinned entry's clone must contain every commit reachable from the
+  // default branch (not just its tip) so an older pin commit is actually
+  // present to check out; `--depth 1` only fetches the tip and would make
+  // checking out anything but the very latest upstream commit fail.
   for (const entry of manifest.repos) {
     const cloneDir = path.join(root, "skills", entry.name);
+    // Compares the manifest pin (full or abbreviated) against the clone's
+    // current `origin/HEAD` and reports — never acts on — any difference.
+    // Moving a pin forward is a reviewed `repos.json` commit, not something
+    // install/update ever does on their own.
+    const reportPinDrift = () => {
+      const h = spawnSync("git", ["-C", cloneDir, "rev-parse", "origin/HEAD"], { encoding: "utf8" });
+      if (h.status !== 0) return;
+      const head = h.stdout.trim();
+      if (!head.toLowerCase().startsWith(entry.pin.toLowerCase())) {
+        report.push(`${entry.name}: pin ${entry.pin} is behind upstream HEAD ${head.slice(0, 12)} (bump the pin in repos.json to move it)`);
+      }
+    };
+    const checkoutPin = () => {
+      const co = spawnSync("git", ["-C", cloneDir, "checkout", "--quiet", "--detach", entry.pin], { encoding: "utf8" });
+      if (co.status !== 0) {
+        const last = (co.stderr || "git checkout failed").trim().split("\n").pop();
+        report.push(`${entry.name}: checkout to pin ${entry.pin} failed (${last})`);
+        anyFailed = true;
+        return false;
+      }
+      reportPinDrift();
+      return true;
+    };
     const doClone = () => {
-      const r = spawnSync("git", ["clone", "--depth", "1", entry.url, cloneDir], { encoding: "utf8", timeout: gitTimeoutMs });
+      const cloneArgs = entry.pin
+        ? ["clone", entry.url, cloneDir]
+        : ["clone", "--depth", "1", entry.url, cloneDir];
+      const r = spawnSync("git", cloneArgs, { encoding: "utf8", timeout: gitTimeoutMs });
       if (r.status !== 0) {
         const last = r.error?.code === "ETIMEDOUT"
           ? `timed out after ${gitTimeoutMs / 1000}s`
@@ -775,6 +815,10 @@ function runFlow(root, mode, { settingsPath, vibeConfigPath, skillsHome, claudeH
         report.push(`${entry.name}: clone failed (${last})`);
         failed.add(entry.name);
         anyFailed = true;
+        return false;
+      }
+      if (entry.pin && !checkoutPin()) {
+        failed.add(entry.name);
         return false;
       }
       return true;
@@ -795,6 +839,22 @@ function runFlow(root, mode, { settingsPath, vibeConfigPath, skillsHome, claudeH
           fs.rmSync(cloneDir, { recursive: true, force: true });
           if (!doClone()) continue;
           state = "cloned";
+        } else if (entry.pin) {
+          // Fetch, then check out whatever repos.json currently pins — never
+          // fast-forward to upstream HEAD on our own; that would make pinning
+          // meaningless. Drift between the pin and upstream HEAD is reported
+          // as a status line below, not acted on.
+          const f = spawnSync("git", ["-C", cloneDir, "fetch", "origin"], { encoding: "utf8", timeout: gitTimeoutMs });
+          if (f.status !== 0) {
+            const reason = f.error?.code === "ETIMEDOUT"
+              ? `timed out after ${gitTimeoutMs / 1000}s`
+              : "left as-is";
+            report.push(`${entry.name}: fetch failed (${reason})`);
+            anyFailed = true;
+          } else {
+            checkoutPin();
+          }
+          state = cloneState(cloneDir) === "dirty" ? "reused (dirty)" : "reused";
         } else {
           const p = spawnSync("git", ["-C", cloneDir, "pull", "--ff-only"], { encoding: "utf8", timeout: gitTimeoutMs });
           if (p.status !== 0) {
@@ -932,12 +992,37 @@ export function runCli(argv, env, opts = {}) {
   let claudeHome = null;
   let claudeError = null;
   const noClaude = argv.includes("--no-claude");
-  if (!noClaude) {
+  if (!noClaude && (cmd === "status" || cmd === "install" || cmd === "update")) {
     const c = resolveClaudeHome(env, opts.home ?? os.homedir());
     if (c.error) claudeError = c.error;
     else claudeHome = c.dir;
   }
   try {
+    if (cmd === "pin") {
+      const manifest = loadManifest(root);
+      const name = argv[1];
+      if (name !== undefined && !manifest.repos.some(e => e.name === name)) {
+        err.push(`pin: unknown repo "${name}"`);
+        return { exitCode: 1, out, err };
+      }
+      const targets = name === undefined ? manifest.repos : manifest.repos.filter(e => e.name === name);
+      let exitCode = 0;
+      for (const entry of targets) {
+        const r = spawnSync("git", ["ls-remote", entry.url, "HEAD"],
+          { encoding: "utf8", timeout: opts.gitTimeoutMs ?? GIT_TIMEOUT_MS });
+        const sha = r.status === 0 ? r.stdout.trim().split(/\s+/)[0] : undefined;
+        if (!sha) {
+          const last = r.error?.code === "ETIMEDOUT"
+            ? `timed out after ${(opts.gitTimeoutMs ?? GIT_TIMEOUT_MS) / 1000}s`
+            : (r.stderr || "git ls-remote failed").trim().split("\n").pop() || "no HEAD reported";
+          err.push(`${entry.name}: ls-remote failed (${last})`);
+          exitCode = 1;
+          continue;
+        }
+        out.push(`${entry.name} ${sha}`);
+      }
+      return { exitCode, out, err };
+    }
     if (cmd === "status") {
       const st = printStatus(root, loadManifest(root), { claudeHome, claudeError });
       out.push(st.output.trimEnd());
@@ -965,7 +1050,7 @@ export function runCli(argv, env, opts = {}) {
     err.push(e.message);
     return { exitCode: 1, out, err };
   }
-  err.push("usage: generate.mjs <install|update|status> [--no-claude]");
+  err.push("usage: generate.mjs <install|update|status|pin [name]> [--no-claude]");
   return { exitCode: 1, out, err };
 }
 

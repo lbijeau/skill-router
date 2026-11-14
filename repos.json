@@ -3,6 +3,7 @@
     {
       "name": "ponytail",
       "url": "https://github.com/DietrichGebert/ponytail",
+      "pin": "96608e078b2d5ea607c5c3b8b5a54d1c1fba6846",
       "description": "Blunt, opinionated senior-engineer persona",
       "tools": "full",
       "persona": "You are Ponytail: a blunt, opinionated senior engineer with no patience for cargo-cult engineering or polite hedging. Name what is wrong, propose the simplest fix that works, and defend it with evidence from the code. Your skills define your working style — when a task matches one, read it and follow it."
@@ -10,6 +11,7 @@
     {
       "name": "mattpocock",
       "url": "https://github.com/mattpocock/skills",
+      "pin": "4ae2317ddb22b046e26455e4f9c9b3aaaf62212d",
       "description": "Matt Pocock's engineering workflows: research, design, TDD, PRs",
       "pathExclude": ["skills/in-progress/**"],
       "tools": "full",
@@ -18,6 +20,7 @@
     {
       "name": "i-have-adhd",
       "url": "https://github.com/ayghri/i-have-adhd",
+      "pin": "1ecea1993b7fce257ffbd686c070948b5e07eda6",
       "description": "ADHD-friendly execution: smallest next step, visible progress, momentum",
       "tools": "full",
       "persona": "You are an ADHD-friendly execution partner. Break work into the smallest next physical action, keep the plan visible, mark finished steps done out loud, and never leave a task ambiguous. Your skill defines how you work — read it and follow it."
@@ -25,12 +28,14 @@
     {
       "name": "security-audit",
       "url": "https://github.com/cloudflare/security-audit-skill",
+      "pin": "c1c8a8c1471069fb0e188eeaff69b8e8db6564a8",
       "description": "Cloudflare's security-audit skill: threat-model and audit code",
       "persona": "You are a security auditor. Start from the threat model: who can reach this code, what they can influence, what they gain. Trace data from trust boundaries inward. Rank findings by exploitability, not scanner severity. Your skill defines the full audit procedure — read it and follow it."
     },
     {
       "name": "superpowers",
       "url": "https://github.com/obra/superpowers",
+      "pin": "22f0b463e7a5e579904dd6211a520321035526f7",
       "description": "Superpowers: brainstorm, spec, plan, TDD delivery discipline",
       "tools": "full",
       "persona": "You work the Superpowers way: brainstorm before building, spec before plan, plan before code, test before implementation. Skills fire in order — using-superpowers first. When a task matches a skill's description, read it and follow it."
@@ -38,6 +43,7 @@
     {
       "name": "diagram-design",
       "url": "https://github.com/cathrynlavery/diagram-design",
+      "pin": "f24d98b05e2d7a5e68c2dedfe46e5b7173f50118",
       "description": "Diagram design guidance for clear visual explanations",
       "tools": "full",
       "persona": "You design diagrams that explain. Pick the diagram type from the relationship shown, label everything, and cut decoration that carries no information. Your skill defines your design rules — read it and follow it."
@@ -45,18 +51,21 @@
     {
       "name": "humanizer",
       "url": "https://github.com/blader/humanizer",
+      "pin": "0ef9fe5bc3572734fd3ae6c448fe00a30cd5dcf0",
       "description": "Rewrites AI-sounding prose so it reads like a person wrote it",
       "persona": "You are the Humanizer. Hunt AI tells — not-X-but-Y contrasts, one-line closers, staged openers, forced triads, dashes everywhere, inflated claims — and rewrite into plain, direct prose without changing meaning. Your skill defines the tell list and rewrite rules — read it and follow it."
     },
     {
       "name": "graphify",
       "url": "https://github.com/Graphify-Labs/graphify",
+      "pin": "16218bfc80d4ca2799734d045039f7ed1a5fa9fb",
       "description": "Graphify — placeholder; upstream ships no skills yet",
       "persona": "You are the Graphify agent. The upstream repo ships no skills yet; this agent activates when it does. Until then, say so plainly when asked."
     },
     {
       "name": "addyosmani",
       "url": "https://github.com/addyosmani/agent-skills",
+      "pin": "301b02b12bff98e4688e6984af6556802322bbde",
       "description": "Addy Osmani's engineering skills: architecture, performance, shipping",
       "tools": "full",
       "persona": "You work in Addy Osmani's style: bias to shipping, performance as a feature, architecture in service of user value. Your skills cover planning, implementation, review, and launch — when a task matches one, read it and follow it."
@@ -64,6 +73,7 @@
     {
       "name": "impeccable",
       "url": "https://github.com/pbakaus/impeccable",
+      "pin": "c3bb418ee38ee49a6b999b7752c1368f3123a2bd",
       "description": "Impeccable: relentless polish toward near-perfect software",
       "skillSource": ".pi/skills",
       "tools": "full",
@@ -72,6 +82,7 @@
     {
       "name": "anatomy",
       "url": "https://github.com/wheresryan22/anatomy",
+      "pin": "1482e8469b0a9e0d8cc18ea2740a01423d29ae80",
       "description": "Interactive isometric SVG/WebGL illustrations of machines and complex systems",
       "tools": "full",
       "persona": "You explain ideas by building them as real, working objects. You craft detailed, interactive isometric figures — many small precise parts in SVG, with optional WebGL shaders and 3D effects. Your skill defines the illustration rules — read it and follow it."
@@ -79,6 +90,7 @@
     {
       "name": "taste-skill",
       "url": "https://github.com/Leonxlnx/taste-skill",
+      "pin": "9b4bf937a1f69348126959c15d2f99a73e65699b",
       "description": "Design taste for coding agents: art direction, references, browser-checked pages instead of generic AI output",
       "tools": "full",
       "persona": "You build web pages with taste, not templates. You set art direction, work from reference images, and verify the result in a real browser so the page does not read as generic AI output. Your skill defines the taste rules — read it and follow it."
@@ -86,6 +98,7 @@
     {
       "name": "hallmark",
       "url": "https://github.com/Nutlope/hallmark",
+      "pin": "407fa689f4a276f2fd389208d271d0fef08f5058",
       "description": "Anti-AI-slop design skill: themed, goal-driven pages linted in a real browser against machine-made tells",
       "tools": "full",
       "persona": "You design pages that refuse to look AI-generated. You pick a theme from the catalog, build the page around what the visitor came to do, and lint the result in a real browser against machine-made tells. The Floor gates never ship. Your skill defines the full ruleset — read it and follow it."

@@ -32,6 +32,7 @@ a separate per-repo policy — see [Trust model](#trust-model) and
 ./install.sh install   # clone repos, generate agents, wire pi + Vibe settings
 ./install.sh update    # git pull each clone, regenerate, report deltas
 ./install.sh status    # read-only health table
+./install.sh pin [name]  # print the current upstream HEAD SHA, for moving a pin
 ```
 
 Then:
@@ -133,14 +134,21 @@ Then:
 
 ## Trust model
 
-- `update` runs `git pull --ff-only` on every clone — whatever upstream
-  pushed is live in the next regenerated agent and catalog, with no review
-  step in between. Skill bodies, descriptions and personas are re-pulled on
-  every update and shown verbatim to the agents that load them (see the
-  manifest note above) — only pin repos you trust.
-- `repos.json` pins a URL, not a commit. There is no SHA pinning or
-  diff-before-apply today; `update` assumes upstream acts in good faith
-  between pulls.
+- `repos.json` entries can pin a commit (`"pin": "<sha>"`, hex, 7-40
+  characters): `install`/`update` then clone/fetch and check out exactly
+  that commit, never upstream HEAD, so a pinned clone cannot move without a
+  reviewed `repos.json` commit. Drift between a pin and the current
+  upstream HEAD is reported as a status line, never acted on.
+  `./install.sh pin [name]` prints the current upstream HEAD SHA so moving
+  a pin stays a hand-edited, reviewed commit — see
+  [ADR-007](docs/decisions/ADR-007-sha-pinning-over-dry-run.md).
+- An entry without `pin` keeps the original model: `update` runs
+  `git pull --ff-only` on that clone — whatever upstream pushed is live in
+  the next regenerated agent and catalog, with no review step in between.
+  Skill bodies, descriptions and personas are re-pulled on every update and
+  shown verbatim to the agents that load them (see the manifest note
+  above) — only pin repos you trust, and add a commit `pin` when you want
+  `update` to stop tracking upstream on its own.
 - Every generated target defaults a repo's agent to a read-only tool
   allowlist: pi gets `tools: read, grep, find, ls`, Vibe gets
   `enabled_tools = ["read_file", "grep"]`, and Claude Code gets
@@ -251,6 +259,13 @@ Edit `repos.json` and rerun `./install.sh update`:
   repo `"full"` only when its skills genuinely need to edit files or run
   commands to do their job — check the actual `SKILL.md` bodies, not just
   the one-line persona, before marking a new pin `"full"`.
+- `pin` — an optional commit SHA (hex, 7-40 characters). With a `pin`,
+  `install`/`update` clone and check out exactly that commit and never move
+  past it on their own; without one, an entry keeps the old behavior of
+  tracking upstream HEAD via `pull --ff-only`. `./install.sh pin [name]`
+  prints the current upstream HEAD SHA for one repo or every repo, to copy
+  into `repos.json` by hand — see [Trust model](#trust-model) and
+  [ADR-007](docs/decisions/ADR-007-sha-pinning-over-dry-run.md).
 
 ## Safety
 
@@ -268,8 +283,10 @@ Edit `repos.json` and rerun `./install.sh update`:
   GitHub push protection is the remote-side backstop.
 - `~/.pi/agent/settings.json` is backed up to `settings.json.bak` before
   any write; an unparseable settings file is never touched.
-- Skill discovery is read-only: clones are only mutated by `git clone` /
-  `git pull --ff-only`; a failed pull leaves the clone as-is.
+- Skill discovery is read-only: clones are only mutated by `git clone`,
+  `git pull --ff-only` (unpinned entries) or `git fetch` + `git checkout`
+  to the manifest's `pin` (pinned entries); a failed pull, fetch or
+  checkout leaves the clone as-is.
 - Repos with zero discoverable skills produce no agent (the manifest entry
   is kept — `update` picks them up if the repo gains skills later).
 - `./install.sh status` is read-only and exits non-zero when anything is
