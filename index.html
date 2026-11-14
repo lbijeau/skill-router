@@ -232,6 +232,13 @@ h2 {
   content: ''; position: absolute; top: -3px; left: 0;
   width: 1.6rem; height: 3px; background: var(--amber);
 }
+/* With JS, each stop's amber segment fills as it scrolls into view — the
+   static stub is the no-JS fallback. */
+.steps.js li::before { width: 0; transition: width 0.5s ease 0.05s; }
+.steps.js li.lit::before { width: 100%; }
+@media (prefers-reduced-motion: reduce) {
+  .steps.js li::before { transition: none; }
+}
 .stop-tag {
   display: inline-flex; align-items: center; gap: 0.3rem;
   font-family: var(--font-mono); font-weight: 600; font-size: 0.68rem;
@@ -627,6 +634,19 @@ h2 {
 </footer>
 
 <script>
+(function () {
+  var steps = document.querySelector(".steps");
+  if (steps && "IntersectionObserver" in window) {
+    steps.classList.add("js");
+    var seen = 0;
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (e.isIntersecting) { e.target.classList.add("lit"); io.unobserve(e.target); }
+      });
+    }, { threshold: 0.5 });
+    steps.querySelectorAll("li").forEach(function (li) { io.observe(li); });
+  }
+})();
 (function () {
   document.querySelectorAll(".cmd-copy").forEach(function (btn) {
     btn.addEventListener("click", function () {
