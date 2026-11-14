@@ -294,33 +294,19 @@ this checkout from `permissions.allow` in `~/.claude/settings.json`, and delete
 
 ## Follow-ups
 
-Known work left over from the Claude Code target, none of it blocking.
+Known work left over from the Claude Code target, none of it blocking —
+now tracked as issues:
 
-**Review leftovers (from PR D)**
-- `flowPaths` rejects `null` and non-objects but lets an array through
-  (`runInstall(root, [])` falls back to the real pi and Vibe config).
-- The export-list test checks that a name is present, not that it is the same
-  binding, so a local export that shadows a star-exported one would pass.
-- `claudeReadRules(root, null)` throws (its default covers only `undefined`),
-  unlike `hasClaudeReadRules` and `mergeClaudePermissions`.
-- The `runCli` guard test covers `install` only (`update` shares the branch), and
-  the TypeError test leaves six temp directories behind.
+- #14 `flowPaths` lets an array through (falls back to real user config)
+- #15 export-list test checks name presence, not binding identity
+- #16 `claudeReadRules(root, null)` throws, unlike its siblings
+- #17 `runCli` guard test covers `install` only; TypeError test leaks temp dirs
+- #18 thread the injected home through the status/install paths
+- #19 two checkouts installing into one config dir prune each other's agents
 
-**Naming**
-- `writeClaudeRouterAgent` is a thin wrapper kept for symmetry with
-  `writeRouterAgent`.
-
-**Deferred by design**
-- `settings.json.bak` is overwritten by each merge, and the temporary file it is
-  written through exists for a few milliseconds at the default mode before being
-  set to 0600 and renamed; `--no-claude` is not sticky.
-- An injected home reaches the allow-rule functions and `resolveClaudeHome`, but
-  is not threaded through `statusOf`, `claudeInstallStatus` or `runClaudeInstall`:
-  no caller needs it, and every test that matters uses a root outside the home.
-- A clone symlink sweep (the live probe showed reads through a symlink in a
-  clone prompt, so it is not needed today), an uninstall helper, and putting the
-  checkout path in the ownership marker. Two checkouts installing into one
-  config dir still prune each other's agents.
+Other deferred-by-design items (an uninstall helper, a clone symlink sweep,
+`--no-claude` stickiness, the single `.bak` generation per merge) are noted
+in those issues where relevant.
 
 ## Tests
 
