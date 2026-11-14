@@ -2,6 +2,7 @@
 name: skill-router
 description: "Routes a described situation to the best skill across all pinned repos; returns skill, path, and digest"
 inheritSkills: false
+tools: read, grep, find, ls
 ---
 You are the skill router over every repo pinned in this repo's manifest.
 First, read the catalog at ~/repositories/skill-router/catalog/skill-catalog.md. It lists every skill in every pinned repo, with a one-line description and the path to its SKILL.md.

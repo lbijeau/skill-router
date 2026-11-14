@@ -57,6 +57,24 @@ test("loadManifest rejects invalid names", () => {
   }
 });
 
+test("loadManifest rejects a repos.json entry named skill-router (reserved, collides with the router agent)", () => {
+  const root = tmp();
+  w(root, "repos.json", JSON.stringify({ repos: [
+    { name: "skill-router", url: "https://github.com/x/y", description: "d", persona: "p" }]}));
+  assert.throws(() => gen.loadManifest(root), /skill-router: reserved name/);
+  clean(root);
+});
+
+test("loadManifest rejects a repos.local.json overlay entry named skill-router too", () => {
+  const root = tmp();
+  w(root, "repos.json", JSON.stringify({ repos: [
+    { name: "a", url: "https://github.com/x/y", description: "d", persona: "p" }]}));
+  w(root, "repos.local.json", JSON.stringify({ repos: [
+    { name: "skill-router", url: "file:///tmp/skill-router", description: "d", persona: "p" }]}));
+  assert.throws(() => gen.loadManifest(root), /skill-router: reserved name/);
+  clean(root);
+});
+
 test("loadManifest rejects missing required fields", () => {
   for (const missing of ["url", "description", "persona"]) {
     const root = tmp();
@@ -1536,6 +1554,7 @@ test("renderRouterAgent: frontmatter shape and persona body", () => {
   eq(out.startsWith("---\nname: skill-router\n"), true);
   eq(/^description: "/.test(out.split("\n")[2]), true);
   eq(out.includes("inheritSkills: false"), true);
+  eq(out.includes(gen.PI_READONLY_TOOLS_LINE), true);
   eq(/^skills:/m.test(out), false);
   eq(/^skillPath:/m.test(out), false);
   eq(out.includes("/fake/home"), false);   // no home path leaks into the file
@@ -1932,7 +1951,7 @@ test("printStatus: a name as wide as the old fixed column doesn't glue into CLON
 // ---- Claude Code target: Task 1 ----
 test("renderRouterAgent: exact bytes (pinned before the claude refactor)", () => {
   eq(gen.renderRouterAgent({ root: "/x/sr", home: "/x" }),
-    "---\nname: skill-router\ndescription: \"Routes a described situation to the best skill across all pinned repos; returns skill, path, and digest\"\ninheritSkills: false\n---\nYou are the skill router over every repo pinned in this repo's manifest.\nFirst, read the catalog at ~/sr/catalog/skill-catalog.md. It lists every skill in every pinned repo, with a one-line description and the path to its SKILL.md.\n\nMatch the caller's situation to the catalog. When two skills are close, open both SKILL.md files and say which one fits and why the other does not.\n\nOpen the winning SKILL.md and return: the skill name, its path, why it fits, and a short digest of the real file. Never answer from the catalog description alone.\n\nRecommend and stop. Do not execute the skill, edit files, or start the work.\n\nIf nothing fits, say so plainly; do not force a nearest match.\n");
+    "---\nname: skill-router\ndescription: \"Routes a described situation to the best skill across all pinned repos; returns skill, path, and digest\"\ninheritSkills: false\ntools: read, grep, find, ls\n---\nYou are the skill router over every repo pinned in this repo's manifest.\nFirst, read the catalog at ~/sr/catalog/skill-catalog.md. It lists every skill in every pinned repo, with a one-line description and the path to its SKILL.md.\n\nMatch the caller's situation to the catalog. When two skills are close, open both SKILL.md files and say which one fits and why the other does not.\n\nOpen the winning SKILL.md and return: the skill name, its path, why it fits, and a short digest of the real file. Never answer from the catalog description alone.\n\nRecommend and stop. Do not execute the skill, edit files, or start the work.\n\nIf nothing fits, say so plainly; do not force a nearest match.\n");
 });
 
 const CE = (over = {}) => ({ name: "a", url: "https://github.com/x/y", description: "d", persona: "p", ...over });

@@ -36,6 +36,15 @@ function validateManifestEntry(entry, seen) {
   if (typeof entry.name !== "string" || !NAME_RE.test(entry.name) || entry.name.length > 64) {
     throw new Error(`invalid name: ${JSON.stringify(entry?.name)}`);
   }
+  // The router agent's own filename across all three generated agent dirs
+  // (agents/, agents-vibe/, agents-claude/) is ROUTER_AGENT_NAME; a manifest
+  // entry with that name would collide with it. claude.mjs's
+  // RESERVED_AGENT_NAMES/claudeSkipReason also rejects it at write time (for
+  // a manifest object built by hand rather than loaded here) — that is
+  // defense in depth, not a substitute for this load-time check.
+  if (entry.name === ROUTER_AGENT_NAME) {
+    throw new Error(`${entry.name}: reserved name, collides with the router agent`);
+  }
   for (const field of REQUIRED_FIELDS) {
     if (typeof entry[field] !== "string" || entry[field].length === 0) {
       throw new Error(`${entry.name}: missing ${field}`);
@@ -265,6 +274,7 @@ export function renderRouterAgent({ root = REPO_ROOT, home } = {}) {
     `name: ${ROUTER_AGENT_NAME}`,
     `description: ${yamlQuote(ROUTER_DESCRIPTION)}`,
     "inheritSkills: false",
+    PI_READONLY_TOOLS_LINE,
     "---",
     ...routerBodyLines(root, home),
     "",

@@ -63,6 +63,11 @@ export function isOwnedClaudeAgent(file) {
 }
 
 // Why an entry gets no Claude agent regardless of its skills, or null.
+// validateManifestEntry in generate.mjs already rejects ROUTER_AGENT_NAME at
+// manifest load time; this check is defense in depth for a manifest object
+// built by hand (as some tests do) rather than loaded through loadManifest,
+// plus Claude's own extra reserved subagent names (general-purpose, explore,
+// plan) that have nothing to do with the router.
 export function claudeSkipReason(entry) {
   if (RESERVED_AGENT_NAMES.has(entry.name.toLowerCase())) return "reserved agent name";
   if (claudeText(entry.description) === "") return "empty description";
