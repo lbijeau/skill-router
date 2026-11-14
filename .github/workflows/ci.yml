@@ -21,8 +21,9 @@ jobs:
 
       # Committed generated files (agents-vibe, agents-claude, catalog, the
       # router agents) embed paths anchored at ~/repositories/skill-router
-      # (CONTRIBUTING.md, ADR-008). Regenerate from exactly that path,
-      # regardless of this runner's real $HOME, so a stale commit fails CI
+      # (CONTRIBUTING.md, ADR-008). Copy the checkout to that canonical path
+      # under the runner's home and regenerate with --anchor $HOME (the home
+      # to anchor against — not the repo path), so a stale commit fails CI
       # instead of only surfacing for whoever next runs install/update from
       # the canonical location.
       - name: Regenerate committed files at the canonical anchor and diff
@@ -31,5 +32,5 @@ jobs:
           mkdir -p "$HOME/repositories"
           cp -r "$GITHUB_WORKSPACE" "$HOME/repositories/skill-router"
           cd "$HOME/repositories/skill-router"
-          node scripts/generate.mjs install --anchor "$HOME/repositories/skill-router"
+          node scripts/generate.mjs install --anchor "$HOME"
           git diff --exit-code -- agents agents-vibe agents-claude catalog
