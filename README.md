@@ -194,6 +194,19 @@ every run — `./install.sh status` reports both (`CATALOG` and `ROUTER`
 columns). The global skill is boilerplate and is overwritten on update; put
 standing behavior in your own `AGENTS.md` or say it in the invocation.
 
+Vibe gets a `skill-router` agent too (`agents-vibe/skill-router.toml`, same
+persona, same `enabled_tools = ["read_file", "grep"]` allowlist as every
+other generated Vibe subagent), but no `route-skill` invocation skill — Vibe
+has no skill-loading tool for the host model to call. Vibe discovers
+`skill-router` the same way it discovers every per-repo subagent: by its
+`description`, through the `agent_paths` entry already wired into
+`~/.vibe/config.toml`. The mechanics are confirmed (a non-blank `description`
+is all a Vibe subagent type needs to be visible, and nothing beyond
+`agent_paths` is required); whether Vibe's model actually reaches for the
+router unprompted has not been checked with a live probe the way
+[Claude Code isolation](#claude-code-isolation) was — treat it as plausible,
+not guaranteed, and re-check after Vibe upgrades.
+
 ## Claude Code isolation
 
 Each Claude Code agent is limited to `Read`, `Grep` and `Glob` (no `Skill`

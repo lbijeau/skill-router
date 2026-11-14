@@ -493,7 +493,7 @@ test("status: exit rules incl. expected absence for zero-skill entries", () => {
   w(root, "agents-vibe/one.toml", gen.renderVibeAgentTOML(manifest.repos[0], found.skills));
   gitRepo(path.join(root, "skills/zero"));           // clone ok, no skills
   gen.writeSkillCatalog(root, manifest);
-  gen.writeRouterAgent(root); writeClaudeArtifacts(root, manifest);
+  gen.writeRouterAgent(root); gen.writeVibeRouterAgent(root); writeClaudeArtifacts(root, manifest);
   const r = gen.statusOf(root, manifest);
   eq(r.catalog, "in-sync");
   eq(r.router, "in-sync");
@@ -520,7 +520,7 @@ test("status: zero-skill leftover TOML is stale and fails exit", () => {
   w(root, "agents-vibe/one.toml", gen.renderVibeAgentTOML(manifest.repos[0], found.skills));
   gitRepo(path.join(root, "skills/zero"));
   gen.writeSkillCatalog(root, manifest);
-  gen.writeRouterAgent(root); writeClaudeArtifacts(root, manifest);
+  gen.writeRouterAgent(root); gen.writeVibeRouterAgent(root); writeClaudeArtifacts(root, manifest);
   w(root, "agents-vibe/zero.toml", "leftover");
   const r = gen.statusOf(root, manifest);
   eq(r.rows.find(x => x.name === "zero").vibe, "stale");
@@ -539,7 +539,7 @@ test("status: only-vibe-stale forces exit 1", () => {
   w(root, "agents/one.md", gen.renderAgentFile(manifest.repos[0], ["a"]));
   w(root, "agents-vibe/one.toml", "tampered");
   gen.writeSkillCatalog(root, manifest);
-  gen.writeRouterAgent(root); writeClaudeArtifacts(root, manifest);
+  gen.writeRouterAgent(root); gen.writeVibeRouterAgent(root); writeClaudeArtifacts(root, manifest);
   const r = gen.statusOf(root, manifest);
   eq(r.rows[0].agent, "in-sync");
   eq(r.rows[0].vibe, "stale");
@@ -559,7 +559,7 @@ test("status: name collision with user agents dir is a warning, not an exit", ()
   w(root, "agents-vibe/one.toml", gen.renderVibeAgentTOML(manifest.repos[0], found.skills));
   w(ua, "one.toml", "user agent");
   gen.writeSkillCatalog(root, manifest);
-  gen.writeRouterAgent(root); writeClaudeArtifacts(root, manifest);
+  gen.writeRouterAgent(root); gen.writeVibeRouterAgent(root); writeClaudeArtifacts(root, manifest);
   const r = gen.statusOf(root, manifest, { userAgentsDir: ua });
   eq(r.warnings.some(x => /one.*collision/.test(x)), true);
   eq(r.exitCode, 0);
@@ -584,7 +584,7 @@ test("status: stale, missing, dirty, not-a-repo, missing-clone all flagged", () 
   w(root, "skills/dirty/untracked.txt", "x");
   w(root, "skills/fake/junk.txt", "x");           // dir, no .git
   gen.writeSkillCatalog(root, manifest);
-  gen.writeRouterAgent(root); writeClaudeArtifacts(root, manifest);
+  gen.writeRouterAgent(root); gen.writeVibeRouterAgent(root); writeClaudeArtifacts(root, manifest);
   const r = gen.statusOf(root, manifest);
   const by = n => r.rows.find(x => x.name === n);
   eq(by("stale").agent, "stale"); eq(by("stale").clone, "ok");
@@ -967,6 +967,8 @@ test("install: report mentions both targets and prints reminders", () => {
   const r = gen.runInstall(root, { settingsPath: sp, vibeConfigPath: vp });
   eq(r.exitCode, 0);
   eq(r.report.some(l => /a: cloned, 1 skills, agent written \(pi, vibe, claude\)/.test(l)), true);
+  eq(r.report.includes("vibe router agent: skill-router written to agents-vibe/skill-router.toml"), true);
+  eq(fs.existsSync(path.join(root, "agents-vibe", "skill-router.toml")), true);
   eq(r.report.some(l => /vibe config: agent_paths added/.test(l)), true);
   eq(r.report.some(l => /vibe config: allowlist added/.test(l)), true);
   eq(r.report.includes("reminder: run /reload (or restart Vibe) to pick up new agents"), true);
@@ -1561,6 +1563,48 @@ test("writeRouterAgent: writes, idempotent", () => {
   clean(root);
 });
 
+test("renderVibeRouterTOML: subagent shape, pinned read-only tools, no skill tool, non-blank description", () => {
+  const home = "/fake/home";
+  const out = gen.renderVibeRouterTOML({ root: "/fake/home/sr", home });
+  eq(out.startsWith('agent_type = "subagent"\n'), true);
+  const descLine = out.split("\n").find(l => l.startsWith("description = "));
+  eq(descLine, 'description = "Routes a described situation to the best skill across all pinned repos; returns skill, path, and digest"');
+  eq(descLine.length > 'description = ""'.length, true);     // non-blank: a blank one invalidates every Vibe agent type
+  eq(out.includes('enabled_tools = ["read_file", "grep"]'), true);
+  eq(out.includes('disabled_tools = ["skill"]'), true);
+  eq(out.includes(gen.VIBE_MARKER), true);
+  eq(out.includes("Recommend and stop"), true);
+  eq(out.includes("digest"), true);
+  eq(out.includes("/fake/home"), false);        // no home path leaks into the file
+  eq(out.includes("~/sr/catalog/skill-catalog.md"), true);
+  eq(out.trimEnd().endsWith('"""'), true);
+});
+
+test("writeVibeRouterAgent: writes, idempotent", () => {
+  const root = tmp();
+  const r = gen.writeVibeRouterAgent(root);
+  eq(r.written, true);
+  const file = path.join(root, "agents-vibe", "skill-router.toml");
+  eq(fs.existsSync(file), true);
+  const first = fs.readFileSync(file, "utf8");
+  eq(gen.writeVibeRouterAgent(root).written, true);
+  eq(fs.readFileSync(file, "utf8"), first);
+  clean(root);
+});
+
+test("prune: never removes the vibe skill-router agent, even though its instructions share the VIBE_MARKER orphan-sweep text", () => {
+  const root = tmp();
+  w(root, "repos.json", JSON.stringify({ repos: [
+    { name: "one", url: "https://github.com/x/y", description: "d", persona: "p" }]}));
+  gen.writeVibeRouterAgent(root);
+  w(root, "agents-vibe/gone.toml", 'agent_type = "subagent"\ndescription = "d"\ninstructions = """\n' + gen.VIBE_MARKER + '\n"""\n');
+  const r = gen.prune(root, gen.loadManifest(root));
+  eq(r.vibeAgents.join(","), "gone");
+  eq(fs.existsSync(path.join(root, "agents-vibe", "gone.toml")), false);
+  eq(fs.existsSync(path.join(root, "agents-vibe", "skill-router.toml")), true);
+  clean(root);
+});
+
 test("writeVibeAgentFiles, writeClaudeAgentFiles, writeSkillCatalog, writeRouterAgent, writeClaudeRouterAgent: an anchor re-homes committed paths, not the real root", () => {
   const H = tmp();
   const root = path.join(H, "sr");                  // root is under H, never under the real os.homedir()
@@ -1580,6 +1624,9 @@ test("writeVibeAgentFiles, writeClaudeAgentFiles, writeSkillCatalog, writeRouter
 
   gen.writeRouterAgent(root, H);
   eq(fs.readFileSync(path.join(root, "agents/skill-router.md"), "utf8").includes("~/sr/catalog/skill-catalog.md"), true);
+
+  gen.writeVibeRouterAgent(root, H);
+  eq(fs.readFileSync(path.join(root, "agents-vibe/skill-router.toml"), "utf8").includes("~/sr/catalog/skill-catalog.md"), true);
 
   gen.writeClaudeRouterAgent(root, H);
   eq(fs.readFileSync(path.join(root, "agents-claude/skill-router.md"), "utf8").includes("~/sr/catalog/skill-catalog.md"), true);
@@ -1766,7 +1813,7 @@ test("status: tampered catalog or router is stale and fails exit", () => {
   const found = gen.discoverSkills(path.join(root, "skills/one"), manifest.repos[0]);
   w(root, "agents-vibe/one.toml", gen.renderVibeAgentTOML(manifest.repos[0], found.skills));
   gen.writeSkillCatalog(root, manifest);
-  gen.writeRouterAgent(root); writeClaudeArtifacts(root, manifest);
+  gen.writeRouterAgent(root); gen.writeVibeRouterAgent(root); writeClaudeArtifacts(root, manifest);
   w(root, "catalog/skill-catalog.md", "tampered");
   let r = gen.statusOf(root, manifest);
   eq(r.catalog, "stale");
@@ -1826,7 +1873,7 @@ test("statusOf: missing clone gets skip semantics, catalog can be in-sync", () =
   const found = gen.discoverSkills(path.join(root, "skills/one"), manifest.repos[0]);
   w(root, "agents-vibe/one.toml", gen.renderVibeAgentTOML(manifest.repos[0], found.skills));
   gen.writeSkillCatalog(root, manifest, new Set(["gone"]));
-  gen.writeRouterAgent(root); writeClaudeArtifacts(root, manifest);
+  gen.writeRouterAgent(root); gen.writeVibeRouterAgent(root); writeClaudeArtifacts(root, manifest);
   const r = gen.statusOf(root, manifest);
   eq(r.catalog, "in-sync");
   eq(r.rows.find(x => x.name === "gone").clone, "missing");
@@ -1844,7 +1891,7 @@ test("printStatus: catalog/router values align under their header columns", () =
   const found = gen.discoverSkills(path.join(root, "skills/one"), manifest.repos[0]);
   w(root, "agents-vibe/one.toml", gen.renderVibeAgentTOML(manifest.repos[0], found.skills));
   gen.writeSkillCatalog(root, manifest);
-  gen.writeRouterAgent(root); writeClaudeArtifacts(root, manifest);
+  gen.writeRouterAgent(root); gen.writeVibeRouterAgent(root); writeClaudeArtifacts(root, manifest);
   const lines = gen.printStatus(root, manifest).output.split("\n");
   const header = lines[0];
   const values = lines[1];
@@ -1874,7 +1921,7 @@ test("printStatus: a name as wide as the old fixed column doesn't glue into CLON
   const found = gen.discoverSkills(path.join(root, "skills", name), manifest.repos[0]);
   w(root, `agents-vibe/${name}.toml`, gen.renderVibeAgentTOML(manifest.repos[0], found.skills));
   gen.writeSkillCatalog(root, manifest);
-  gen.writeRouterAgent(root); writeClaudeArtifacts(root, manifest);
+  gen.writeRouterAgent(root); gen.writeVibeRouterAgent(root); writeClaudeArtifacts(root, manifest);
   const lines = gen.printStatus(root, manifest).output.split("\n");
   const row = lines[2];
   eq(row.startsWith(`${name} `), true);         // at least one space before the CLONE value
@@ -2442,7 +2489,7 @@ function statusFixture() {
   w(root, "repos.json", JSON.stringify(manifest));
   skill(root, "skills/one/a"); gitRepo(path.join(root, "skills/one")); gitRepo(path.join(root, "skills/zero"));
   gen.writeAgentFiles(root, manifest); gen.writeVibeAgentFiles(root, manifest);
-  gen.writeSkillCatalog(root, manifest); gen.writeRouterAgent(root); writeClaudeArtifacts(root, manifest);
+  gen.writeSkillCatalog(root, manifest); gen.writeRouterAgent(root); gen.writeVibeRouterAgent(root); writeClaudeArtifacts(root, manifest);
   return { root, manifest };
 }
 
@@ -2468,6 +2515,22 @@ test("status: claudeRouter stale on its own forces exit 1", () => {
   eq(r.claudeRouter, "stale");
   eq(r.router, "in-sync"); eq(r.catalog, "in-sync");
   eq(r.rows.every(x => x.agent === "in-sync" && (x.claude === "in-sync" || x.claude === "—")), true);
+  eq(r.exitCode, 1);
+  clean(root);
+});
+
+test("status: vibeRouter missing or stale on its own forces exit 1", () => {
+  const { root, manifest } = statusFixture();
+  eq(gen.statusOf(root, manifest).vibeRouter, "in-sync");
+  eq(gen.statusOf(root, manifest).exitCode, 0);
+  fs.rmSync(path.join(root, "agents-vibe", "skill-router.toml"));
+  let r = gen.statusOf(root, manifest);
+  eq(r.vibeRouter, "missing");
+  eq(r.exitCode, 1);
+  w(root, "agents-vibe/skill-router.toml", "tampered");
+  r = gen.statusOf(root, manifest);
+  eq(r.vibeRouter, "stale");
+  eq(r.router, "in-sync"); eq(r.claudeRouter, "in-sync"); eq(r.catalog, "in-sync");
   eq(r.exitCode, 1);
   clean(root);
 });
@@ -2573,6 +2636,17 @@ test("printStatus: a stale claude router is shown, not only in the exit code", (
   const st = gen.printStatus(root, manifest);
   eq(st.exitCode, 1);
   eq(st.output.includes("claude router: stale"), true);
+  clean(root);
+});
+
+test("printStatus: a stale vibe router is shown, not only in the exit code; settled vibe router prints no line", () => {
+  const { root, manifest } = statusFixture();
+  gen.writeVibeRouterAgent(root);
+  eq(gen.printStatus(root, manifest).output.includes("vibe router:"), false);   // in-sync: no line
+  w(root, "agents-vibe/skill-router.toml", "tampered");
+  const st = gen.printStatus(root, manifest);
+  eq(st.exitCode, 1);
+  eq(st.output.includes("vibe router: stale"), true);
   clean(root);
 });
 

@@ -279,6 +279,36 @@ export function writeRouterAgent(root, home) {
   return { file, written: true };
 }
 
+// Same router persona as the pi/Claude agents, in Vibe's TOML shape: a pinned
+// enabled_tools allowlist (Vibe's tool_ceiling makes this a hard ceiling, not
+// just a default) and an explicit note that there is no skill tool here
+// (Vibe has no per-agent skills: field; the router's own instructions are its
+// only path to the catalog and the skills it points into).
+export function renderVibeRouterTOML({ root = REPO_ROOT, home } = {}) {
+  const description = tomlEscape(normalizeText(ROUTER_DESCRIPTION));
+  const instructions = tomlEscape(normalizeText(
+    [...routerBodyLines(root, home), "", VIBE_MARKER].join("\n"),
+    { keepNewlines: true }));
+  return [
+    'agent_type = "subagent"',
+    `description = "${description}"`,
+    `enabled_tools = [${VIBE_READONLY_ENABLED_TOOLS.map(t => `"${t}"`).join(", ")}]`,
+    'disabled_tools = ["skill"]',
+    'instructions = """',
+    instructions,
+    '"""',
+    "",
+  ].join("\n");
+}
+
+export function writeVibeRouterAgent(root, home) {
+  const agentsDir = path.join(root, "agents-vibe");
+  fs.mkdirSync(agentsDir, { recursive: true });
+  const file = path.join(agentsDir, `${ROUTER_AGENT_NAME}.toml`);
+  fs.writeFileSync(file, renderVibeRouterTOML({ root, home }));
+  return { file, written: true };
+}
+
 // The catalog is the router subagent's source of truth: every skill in every
 // clone, one row each, ~-anchored so the committed file is machine-independent.
 // It is itself committed and shared, so entries from the repos.local.json
@@ -362,7 +392,7 @@ export function prune(root, manifest) {
   if (fs.existsSync(vibeDir)) {
     for (const f of fs.readdirSync(vibeDir)) {
       const m = f.match(/^(.*)\.toml$/);
-      if (m && !names.has(m[1])) {
+      if (m && m[1] !== ROUTER_AGENT_NAME && !names.has(m[1])) {
         let generated = false;
         try {
           generated = fs.readFileSync(path.join(vibeDir, f), "utf8").includes(VIBE_MARKER);
@@ -722,6 +752,8 @@ export function statusOf(root, manifest, opts = {}) {
     () => renderRouterAgent({ root }));
   const claudeRouter = fileState(path.join(root, "agents-claude", `${ROUTER_AGENT_NAME}.md`),
     () => renderClaudeRouterAgent({ root }));
+  const vibeRouter = fileState(path.join(root, "agents-vibe", `${ROUTER_AGENT_NAME}.toml`),
+    () => renderVibeRouterTOML({ root }));
   let claudeInstall = STATE.NA;
   const claudeHome = opts.claudeHome;
   if (opts.claudeError) {
@@ -735,13 +767,13 @@ export function statusOf(root, manifest, opts = {}) {
   }
   const ok = rows.every(r => r.clone === "ok" && r.agent === STATE.IN_SYNC
     && isSettled(r.vibe) && isSettled(r.claude)) && catalog === STATE.IN_SYNC
-    && router === STATE.IN_SYNC && claudeRouter === STATE.IN_SYNC
+    && router === STATE.IN_SYNC && claudeRouter === STATE.IN_SYNC && vibeRouter === STATE.IN_SYNC
     && (claudeInstall === STATE.NA || claudeInstall === STATE.IN_SYNC);
-  return { rows, dropped, warnings, catalog, router, claudeRouter, claudeInstall, exitCode: ok ? 0 : 1 };
+  return { rows, dropped, warnings, catalog, router, claudeRouter, vibeRouter, claudeInstall, exitCode: ok ? 0 : 1 };
 }
 
 export function printStatus(root, manifest, opts = {}) {
-  const { rows, dropped, warnings, catalog, router, claudeRouter, claudeInstall, exitCode } = statusOf(root, manifest, opts);
+  const { rows, dropped, warnings, catalog, router, claudeRouter, vibeRouter, claudeInstall, exitCode } = statusOf(root, manifest, opts);
   // NAME column width tracks the longest name in play, with a 2-space gap, so
   // a name as long as the old constant (e.g. "security-audit") doesn't glue
   // straight into the next column.
@@ -756,6 +788,7 @@ export function printStatus(root, manifest, opts = {}) {
       + r.agent.padEnd(10) + r.vibe.padEnd(10) + r.claude);
   }
   lines.push(`claude install: ${claudeInstall}`);
+  if (vibeRouter !== "in-sync") lines.push(`vibe router: ${vibeRouter}`);
   if (claudeRouter !== "in-sync") lines.push(`claude router: ${claudeRouter}`);
   lines.push(...dropped, ...warnings);
   return { output: lines.join("\n") + "\n", exitCode };
@@ -907,6 +940,8 @@ function runFlow(root, mode, { settingsPath, vibeConfigPath, skillsHome, claudeH
   report.push(`catalog: ${catalogResult.skillCount} skills written to catalog/skill-catalog.md`);
   writeRouterAgent(root, anchor);
   report.push(`router agent: ${ROUTER_AGENT_NAME} written to agents/${ROUTER_AGENT_NAME}.md`);
+  writeVibeRouterAgent(root, anchor);
+  report.push(`vibe router agent: ${ROUTER_AGENT_NAME} written to agents-vibe/${ROUTER_AGENT_NAME}.toml`);
   writeClaudeRouterAgent(root, anchor);
   report.push(`claude router agent: ${ROUTER_AGENT_NAME} written to agents-claude/${ROUTER_AGENT_NAME}.md`);
   const synced = syncGlobalSkills(root, skillsHome);
