@@ -911,7 +911,7 @@ const DEFAULT_VIBE_CONFIG = () => path.join(process.env.VIBE_HOME || path.join(o
 // skills dir; `claudeHome` null/undefined skips the Claude install step
 // (generation of agents-claude/ still runs). Only the CLI computes a Claude default.
 function flowPaths(paths) {
-  if (paths === null || typeof paths !== "object") {
+  if (paths === null || typeof paths !== "object" || Array.isArray(paths)) {
     throw new TypeError("runInstall/runUpdate take (root, { settingsPath, vibeConfigPath, skillsHome, claudeHome })");
   }
   return { ...paths,

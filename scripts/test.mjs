@@ -2006,6 +2006,17 @@ test("claudeReadRules: under home is ~-relative for skills and catalog", () => {
   clean(home);
 });
 
+test("claudeReadRules: a null home falls back to the real home instead of throwing", () => {
+  const root = tmp();
+  let threw = false;
+  let withNull;
+  try { withNull = gen.claudeReadRules(root, null); } catch { threw = true; }
+  eq(threw, false);
+  eq(withNull.rules.join("|"), gen.claudeReadRules(root).rules.join("|"));
+  eq(withNull.rules.join("|"), gen.claudeReadRules(root, undefined).rules.join("|"));
+  clean(root);
+});
+
 test("claudeReadRules: outside home is //-absolute; metacharacter path errors; symlinked checkout resolves to real path", () => {
   const home = tmp(), base = tmp(); const root = path.join(base, "sr");
   fs.mkdirSync(root, { recursive: true });
@@ -2746,21 +2757,32 @@ test("runCli: install with a custom root but no explicit config paths exits 1 an
   clean(f.root); clean(f.claude); clean(home);
 });
 
-test("runInstall and runUpdate: a stale positional call or null throws a TypeError naming the new signature", () => {
-  for (const bad of ["/tmp/settings.json", null, 5]) {
+test("runCli: update with a custom root but no explicit config paths exits 1 and writes nothing", () => {
+  const f = claudeFixture(); const home = tmp();
+  const r = gen.runCli(["update", "--no-claude"], {}, { root: f.root, home });
+  eq(r.exitCode, 1);
+  eq(r.err.some(l => /explicit settingsPath/.test(l)), true);
+  eq(fs.existsSync(path.join(f.root, "agents")), false);                    // nothing generated either
+  clean(f.root); clean(f.claude); clean(home);
+});
+
+test("runInstall and runUpdate: a stale positional call, null or an array throws a TypeError naming the new signature", () => {
+  for (const bad of ["/tmp/settings.json", null, 5, [], [1, 2, 3]]) {
     for (const fn of [gen.runInstall, gen.runUpdate]) {
+      const dir = tmp();
       let err;
-      try { fn(tmp(), bad); } catch (e) { err = e; }
+      try { fn(dir, bad); } catch (e) { err = e; }
       eq(err instanceof TypeError, true);
       eq(/settingsPath/.test(err.message), true);
+      clean(dir);
     }
   }
 });
 
-test("generate.mjs re-exports every name of common, discover and claude (no ambiguous star-export is dropped)", async () => {
+test("generate.mjs re-exports every name of common, discover and claude (no ambiguous star-export is dropped or shadowed)", async () => {
   for (const f of ["common", "discover", "claude"]) {
     const m = await import(`./${f}.mjs`);
-    for (const k of Object.keys(m)) eq(k in gen, true, `${f}.${k} missing from generate`);
+    for (const k of Object.keys(m)) eq(gen[k] === m[k], true, `${f}.${k} missing from or shadowed in generate`);
   }
 });
 

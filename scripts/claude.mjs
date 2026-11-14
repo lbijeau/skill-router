@@ -237,7 +237,8 @@ export function claudeAgentsInstallState(root, agentsDir) {
 // Read allow rules for the Claude config: skills/** (clones) and catalog/**
 // (the router reads the catalog). Built from realpaths, because Claude Code
 // applies an allow rule only when the path and what it resolves to both match.
-export function claudeReadRules(repoRoot, home = os.homedir()) {
+export function claudeReadRules(repoRoot, home) {
+  home = home ?? os.homedir();
   const real = realPath(path.resolve(repoRoot));
   const homeReal = realPath(path.resolve(home));
   if (/[*?\[\]{}()\\]/.test(real)) {
