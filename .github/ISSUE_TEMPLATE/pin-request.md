@@ -53,3 +53,4 @@ body:
           required: true
         - label: The skill descriptions and persona text will be shown verbatim to generated agents, and I am comfortable vouching for this repo's content.
           required: true
+---

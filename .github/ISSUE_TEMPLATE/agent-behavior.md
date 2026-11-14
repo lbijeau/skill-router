@@ -51,3 +51,4 @@ body:
     attributes:
       label: Which skill was it applying (if any)?
       description: The skill name from the catalog, if a skill was in play.
+---

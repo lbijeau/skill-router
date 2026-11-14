@@ -60,3 +60,4 @@ body:
       options:
         - label: "Yes — I have local-only entries in repos.local.json (this changes generation behavior)"
           required: false
+---
