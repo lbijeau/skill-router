@@ -42,6 +42,13 @@ Then:
 - `repos.json` is the manifest — the single source of truth: one entry per
   repo with `name`, `url`, `description`, `persona`, and optional
   `skillSource` / `pathExclude` curation.
+- An optional `repos.local.json` next to it (gitignored, same `{ repos: [...] }`
+  shape) overlays machine-local entries — e.g. a `file://` clone that only
+  exists on this disk — without ever touching the committed manifest. Local
+  entries get a clone and a generated agent like any other, but they are left
+  out of the committed `catalog/skill-catalog.md`, so they are not routable
+  through the catalog-driven router; invoke their agent by name instead. A
+  local entry whose `name` collides with a committed one is a load error.
 - Each repo is shallow-cloned into `skills/<name>/` (gitignored, never
   committed).
 - One agent definition is generated into `agents/<name>.md` (committed)
@@ -253,3 +260,9 @@ Known work left over from the Claude Code target, none of it blocking.
 ```sh
 node scripts/test.mjs   # offline, fixture-based; no network needed
 ```
+
+## License
+
+skill-router is licensed under the [MIT License](LICENSE). The pinned
+upstream repos it clones keep their own licenses, as listed in
+[ATTRIBUTIONS.md](ATTRIBUTIONS.md).

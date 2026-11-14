@@ -15,6 +15,39 @@ const REQUIRED_FIELDS = ["url", "description", "persona"];
 
 const URL_RE = /^(https:\/\/[\w.-]+(?:\/[\w._~-]+)+\/?|file:\/\/\/[\w.~\/-]+)$/;
 
+function validateManifestEntry(entry, seen) {
+  if (typeof entry.name !== "string" || !NAME_RE.test(entry.name) || entry.name.length > 64) {
+    throw new Error(`invalid name: ${JSON.stringify(entry?.name)}`);
+  }
+  for (const field of REQUIRED_FIELDS) {
+    if (typeof entry[field] !== "string" || entry[field].length === 0) {
+      throw new Error(`${entry.name}: missing ${field}`);
+    }
+  }
+  if (entry.pathExclude !== undefined) {
+    if (!Array.isArray(entry.pathExclude)
+      || entry.pathExclude.some(p => typeof p !== "string" || p.length === 0)) {
+      throw new Error(`${entry.name}: pathExclude must be an array of strings`);
+    }
+  }
+  if (entry.skillSource !== undefined) {
+    if (typeof entry.skillSource !== "string" || entry.skillSource.length === 0) {
+      throw new Error(`${entry.name}: skillSource must be a string`);
+    }
+    const src = path.normalize(entry.skillSource);
+    if (path.isAbsolute(src) || src.split(/[\\/]+/).includes("..")) {
+      throw new Error(`${entry.name}: skillSource must be a relative path inside the clone`);
+    }
+  }
+  if (seen.has(entry.name)) {
+    throw new Error(`duplicate name: ${entry.name}`);
+  }
+  seen.add(entry.name);
+  if (!URL_RE.test(entry.url)) {
+    throw new Error(`${entry.name}: url must be an https GitHub URL or file:// mirror`);
+  }
+}
+
 export function loadManifest(root) {
   const file = path.join(root, "repos.json");
   let parsed;
@@ -27,39 +60,35 @@ export function loadManifest(root) {
     throw new Error("manifest: repos must be an array");
   }
   const seen = new Set();
-  for (const entry of parsed.repos) {
-    if (typeof entry.name !== "string" || !NAME_RE.test(entry.name) || entry.name.length > 64) {
-      throw new Error(`invalid name: ${JSON.stringify(entry?.name)}`);
+  for (const entry of parsed.repos) validateManifestEntry(entry, seen);
+  const repos = [...parsed.repos];
+
+  // repos.local.json is a gitignored overlay for machine-local repos (for
+  // example a file:// clone that only exists on this disk). It must never be
+  // folded into repos.json itself: that file is committed and shared, and a
+  // local entry can carry a home-anchored path that would leak a username or
+  // break install for anyone else who clones this repo. Overlay entries are
+  // merged in after the committed ones, validated the same way (so a name
+  // colliding with a committed entry is still a duplicate-name error), and
+  // flagged `local: true` so generated-but-shared artifacts (the catalog) can
+  // tell them apart from committed entries.
+  const localFile = path.join(root, "repos.local.json");
+  if (fs.existsSync(localFile)) {
+    let localParsed;
+    try {
+      localParsed = JSON.parse(fs.readFileSync(localFile, "utf8"));
+    } catch (e) {
+      throw new Error(`cannot read manifest ${localFile}: ${e.message}`);
     }
-    for (const field of REQUIRED_FIELDS) {
-      if (typeof entry[field] !== "string" || entry[field].length === 0) {
-        throw new Error(`${entry.name}: missing ${field}`);
-      }
+    if (!Array.isArray(localParsed.repos)) {
+      throw new Error("repos.local.json: repos must be an array");
     }
-    if (entry.pathExclude !== undefined) {
-      if (!Array.isArray(entry.pathExclude)
-        || entry.pathExclude.some(p => typeof p !== "string" || p.length === 0)) {
-        throw new Error(`${entry.name}: pathExclude must be an array of strings`);
-      }
-    }
-    if (entry.skillSource !== undefined) {
-      if (typeof entry.skillSource !== "string" || entry.skillSource.length === 0) {
-        throw new Error(`${entry.name}: skillSource must be a string`);
-      }
-      const src = path.normalize(entry.skillSource);
-      if (path.isAbsolute(src) || src.split(/[\\/]+/).includes("..")) {
-        throw new Error(`${entry.name}: skillSource must be a relative path inside the clone`);
-      }
-    }
-    if (seen.has(entry.name)) {
-      throw new Error(`duplicate name: ${entry.name}`);
-    }
-    seen.add(entry.name);
-    if (!URL_RE.test(entry.url)) {
-      throw new Error(`${entry.name}: url must be an https GitHub URL or file:// mirror`);
+    for (const entry of localParsed.repos) {
+      validateManifestEntry(entry, seen);
+      repos.push({ ...entry, local: true });
     }
   }
-  return { repos: parsed.repos };
+  return { repos };
 }
 
 export function renderAgentFile(entry, skillNames) {
@@ -192,6 +221,11 @@ export function writeRouterAgent(root) {
 
 // The catalog is the router subagent's source of truth: every skill in every
 // clone, one row each, ~-anchored so the committed file is machine-independent.
+// It is itself committed and shared, so entries from the repos.local.json
+// overlay (`entry.local`) are excluded — folding a machine-local repo in
+// would make the committed catalog drift between machines. The tradeoff: a
+// local-only repo still gets a local agent, but it is not routable via the
+// catalog-driven router; the caller has to name its agent directly.
 export function renderSkillCatalog(root, manifest, { home, skip } = {}) {
   const homeDir = home ?? os.homedir();
   const skipSet = skip ?? new Set();
@@ -202,6 +236,7 @@ export function renderSkillCatalog(root, manifest, { home, skip } = {}) {
     "",
   ];
   for (const entry of manifest.repos) {
+    if (entry.local) continue;
     parts.push(`## ${entry.name}`, "");
     if (skipSet.has(entry.name)) {
       parts.push("(clone unavailable)", "");
@@ -228,7 +263,7 @@ export function writeSkillCatalog(root, manifest, skip = new Set()) {
   const content = renderSkillCatalog(root, manifest, { skip });
   let skillCount = 0;
   for (const entry of manifest.repos) {
-    if (skip.has(entry.name)) continue;
+    if (entry.local || skip.has(entry.name)) continue;
     skillCount += discoverSkills(path.join(root, "skills", entry.name), entry).skills.length;
   }
   const dir = path.join(root, "catalog");

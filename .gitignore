@@ -6,3 +6,12 @@
 .beads-credential-key
 .beads/proxieddb/
 *.gate.lock*
+
+# OS cruft
+.DS_Store
+
+# Local audio narration (72MB, not for git)
+*.m4a
+
+# Local-only manifest overlay (see skill-router-yhj.1)
+repos.local.json

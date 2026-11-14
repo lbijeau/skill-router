@@ -861,6 +861,69 @@ test("loadManifest accepts https GitHub and file:// mirror urls", () => {
   clean(root);
 });
 
+test("loadManifest: no repos.local.json means only the committed entries load", () => {
+  const root = tmp();
+  w(root, "repos.json", JSON.stringify({ repos: [
+    { name: "a", url: "https://github.com/x/y", description: "d", persona: "p" }]}));
+  const m = gen.loadManifest(root);
+  eq(m.repos.length, 1);
+  eq(m.repos[0].local, undefined);
+  clean(root);
+});
+
+test("loadManifest: repos.local.json overlays entries after the committed ones, flagged local", () => {
+  const root = tmp();
+  w(root, "repos.json", JSON.stringify({ repos: [
+    { name: "a", url: "https://github.com/x/y", description: "d", persona: "p" }]}));
+  w(root, "repos.local.json", JSON.stringify({ repos: [
+    { name: "local-only", url: "file:///tmp/local-only", description: "d", persona: "p" }]}));
+  const m = gen.loadManifest(root);
+  eq(m.repos.length, 2);
+  eq(m.repos[0].name, "a");
+  eq(m.repos[0].local, undefined);
+  eq(m.repos[1].name, "local-only");
+  eq(m.repos[1].local, true);
+  clean(root);
+});
+
+test("loadManifest: a repos.local.json entry named like a committed one is a duplicate-name error", () => {
+  const root = tmp();
+  w(root, "repos.json", JSON.stringify({ repos: [
+    { name: "a", url: "https://github.com/x/y", description: "d", persona: "p" }]}));
+  w(root, "repos.local.json", JSON.stringify({ repos: [
+    { name: "a", url: "file:///tmp/a", description: "d", persona: "p" }]}));
+  assert.throws(() => gen.loadManifest(root), /duplicate name: a/);
+  clean(root);
+});
+
+test("loadManifest: repos.local.json entries are validated the same as committed ones", () => {
+  const root = tmp();
+  w(root, "repos.json", JSON.stringify({ repos: [
+    { name: "a", url: "https://github.com/x/y", description: "d", persona: "p" }]}));
+  w(root, "repos.local.json", JSON.stringify({ repos: [
+    { name: "Bad_Name", url: "file:///tmp/x", description: "d", persona: "p" }]}));
+  assert.throws(() => gen.loadManifest(root), /invalid name/);
+  clean(root);
+});
+
+test("loadManifest: a malformed repos.local.json fails loudly, not silently ignored", () => {
+  const root = tmp();
+  w(root, "repos.json", JSON.stringify({ repos: [
+    { name: "a", url: "https://github.com/x/y", description: "d", persona: "p" }]}));
+  w(root, "repos.local.json", "{ not json");
+  assert.throws(() => gen.loadManifest(root), /cannot read manifest/);
+  clean(root);
+});
+
+test("loadManifest: repos.local.json with a non-array repos is an error", () => {
+  const root = tmp();
+  w(root, "repos.json", JSON.stringify({ repos: [
+    { name: "a", url: "https://github.com/x/y", description: "d", persona: "p" }]}));
+  w(root, "repos.local.json", JSON.stringify({ repos: "nope" }));
+  assert.throws(() => gen.loadManifest(root), /repos\.local\.json: repos must be an array/);
+  clean(root);
+});
+
 test("loadManifest rejects skillSource escaping via backslash (cross-platform)", () => {
   const root = tmp();
   w(root, "repos.json", JSON.stringify({ repos: [
@@ -1346,6 +1409,39 @@ test("renderSkillCatalog: duplicate names across repos stay distinguishable", ()
   eq(out.includes("## two"), true);
   eq(out.includes("- shared: test skill — ~/sr/skills/two/shared/SKILL.md"), true);
   clean(home);
+});
+
+test("renderSkillCatalog: a repos.local.json overlay entry is excluded from the catalog", () => {
+  const home = tmp();
+  const root = path.join(home, "sr");
+  fs.mkdirSync(root, { recursive: true });
+  w(root, "repos.json", JSON.stringify({ repos: [
+    { name: "aaa", url: "https://github.com/x/y", description: "d", persona: "p" }]}));
+  w(root, "repos.local.json", JSON.stringify({ repos: [
+    { name: "local-only", url: "file:///tmp/local-only", description: "d", persona: "p" }]}));
+  skill(root, "skills/aaa/alpha");
+  skill(root, "skills/local-only/beta");
+  const m = gen.loadManifest(root);
+  eq(m.repos.length, 2);
+  const out = gen.renderSkillCatalog(root, m, { home });
+  eq(out.includes("## aaa"), true);
+  eq(out.includes("## local-only"), false);
+  eq(out.includes("- beta"), false);
+  clean(home);
+});
+
+test("writeSkillCatalog: a repos.local.json overlay entry does not count toward skillCount", () => {
+  const root = tmp();
+  w(root, "repos.json", JSON.stringify({ repos: [
+    { name: "aaa", url: "https://github.com/x/y", description: "d", persona: "p" }]}));
+  w(root, "repos.local.json", JSON.stringify({ repos: [
+    { name: "local-only", url: "file:///tmp/local-only", description: "d", persona: "p" }]}));
+  skill(root, "skills/aaa/alpha");
+  skill(root, "skills/local-only/beta");
+  const m = gen.loadManifest(root);
+  const r = gen.writeSkillCatalog(root, m);
+  eq(r.skillCount, 1);
+  clean(root);
 });
 
 test("writeSkillCatalog: failed clones render (clone unavailable) and don't count", () => {
