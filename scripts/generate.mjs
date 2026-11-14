@@ -740,7 +740,7 @@ export function statusOf(root, manifest, opts = {}) {
     const claude = claudeSkipReason(entry)
       // The writer removes an owned leftover; one that is still there is stale.
       ? (entry.name !== ROUTER_AGENT_NAME && isOwnedClaudeAgent(claudeFile) ? STATE.STALE : STATE.NONE)
-      : repoOutputState(claudeFile, n, STATE.NONE, () => renderClaudeAgentFile(entry, found.skills));
+      : repoOutputState(claudeFile, n, STATE.NONE, () => renderClaudeAgentFile(entry, found.skills, { root }));
     rows.push({ name: entry.name, clone, skills: found.skills.length, agent, vibe, claude });
   }
   if (fs.existsSync(userAgentsDir)) {
