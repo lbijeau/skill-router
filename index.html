@@ -1,0 +1,590 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>skill-router — one clean-room agent per skill repo</title>
+<meta name="description" content="skill-router pins 14 upstream skill repos and generates an isolated agent for each, for pi, Mistral Vibe and Claude Code, plus a catalog-driven router.">
+<meta property="og:title" content="skill-router — one clean-room agent per skill repo">
+<meta property="og:description" content="skill-router pins 14 upstream skill repos and generates an isolated agent for each, for pi, Mistral Vibe and Claude Code, plus a catalog-driven router.">
+<meta property="og:url" content="https://lbijeau.github.io/skill-router/">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='4' fill='%230F1B38'/%3E%3Crect x='5' y='7' width='22' height='4' rx='1' fill='%23FFB627'/%3E%3Crect x='5' y='14' width='16' height='4' rx='1' fill='%23FFB627'/%3E%3Crect x='5' y='21' width='19' height='4' rx='1' fill='%23A9B8DC'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* Tokens: night board / concourse --------------------------------------- */
+:root {
+  --concourse: #E9EEF5;   /* page: cool pale blue-gray */
+  --card: #F7F9FC;        /* raised panels on light */
+  --ink: #101B33;         /* deep navy text */
+  --muted: #4A5876;       /* secondary text */
+  --line: #C6D1E4;        /* rules on light */
+  --board: #0F1B38;       /* departure-board navy */
+  --board-line: #24345E;  /* rules on the board */
+  --board-dim: #A9B8DC;   /* secondary text on the board */
+  --amber: #FFB627;       /* split-flap amber */
+  --signal: #0E6C8E;      /* links, focus */
+  --font-display: "Barlow Condensed", "Arial Narrow", "Helvetica Neue", sans-serif;
+  --font-body: "IBM Plex Sans", -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  background: var(--concourse);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 1rem;
+  line-height: 1.6;
+}
+
+.wrap { max-width: 68rem; margin-inline: auto; padding-inline: 1.25rem; }
+
+a { color: var(--signal); text-underline-offset: 0.2em; }
+
+:focus-visible { outline: 3px solid var(--signal); outline-offset: 2px; }
+.board :focus-visible { outline-color: var(--amber); }
+
+.skip {
+  position: absolute; left: -999px; top: 0.5rem; z-index: 10;
+  background: var(--ink); color: #fff; padding: 0.6rem 1rem;
+  border-radius: 4px; font-family: var(--font-mono); font-size: 0.85rem;
+}
+.skip:focus { left: 0.5rem; }
+
+/* Masthead --------------------------------------------------------------- */
+.masthead { border-bottom: 3px solid var(--ink); background: var(--concourse); }
+.masthead-inner {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.5rem 1.5rem;
+  padding-block: 0.9rem;
+}
+.wordmark {
+  font-family: var(--font-display); font-weight: 700; font-size: 1.6rem;
+  letter-spacing: 0.04em; text-transform: uppercase;
+}
+.wordmark span { color: var(--signal); }
+.masthead-meta {
+  font-family: var(--font-mono); font-size: 0.78rem; color: var(--muted);
+  margin-right: auto;
+}
+.masthead-nav { display: flex; gap: 1.1rem; font-size: 0.9rem; }
+.masthead-nav a { text-decoration: none; font-weight: 600; }
+.masthead-nav a:hover { text-decoration: underline; }
+
+/* Hero -------------------------------------------------------------------- */
+.hero { padding-block: 3.2rem 3.6rem; }
+.hero-grid { display: grid; gap: 2.5rem; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); align-items: start; }
+.eyebrow {
+  font-family: var(--font-mono); font-size: 0.78rem; font-weight: 600;
+  letter-spacing: 0.14em; text-transform: uppercase; color: var(--signal);
+  margin-bottom: 0.8rem;
+}
+h1 {
+  font-family: var(--font-display); font-weight: 700; text-transform: uppercase;
+  font-size: clamp(2.6rem, 6vw, 4.1rem); line-height: 1.02; letter-spacing: 0.01em;
+  max-width: 14ch;
+}
+.no-break { white-space: nowrap; }
+.lede { margin-top: 1.1rem; font-size: 1.08rem; max-width: 34rem; color: var(--muted); }
+.lede strong { color: var(--ink); }
+.hero-stats {
+  display: flex; flex-wrap: wrap; gap: 1.6rem; margin-top: 1.6rem;
+  list-style: none; font-family: var(--font-mono); font-size: 0.82rem;
+  color: var(--muted);
+}
+.hero-stats b { display: block; font-size: 1.45rem; color: var(--ink); font-weight: 600; }
+
+/* Install ticket ----------------------------------------------------------- */
+.ticket {
+  background: var(--board); color: var(--board-dim); border-radius: 10px;
+  padding: 1.3rem 1.3rem 1.1rem; box-shadow: 0 10px 30px rgba(16, 27, 51, 0.18);
+}
+.ticket-head {
+  display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.9rem;
+  font-family: var(--font-display); font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.06em; font-size: 1.15rem; color: var(--amber);
+}
+.ticket-head::before {
+  content: ""; width: 0.6rem; height: 0.6rem; border-radius: 2px;
+  background: var(--amber); animation: blink 2.2s steps(1) infinite;
+}
+@keyframes blink { 50% { opacity: 0.25; } }
+.cmds { list-style: none; display: grid; gap: 0.45rem; }
+.cmd {
+  display: flex; align-items: center; gap: 0.6rem;
+  background: rgba(255, 255, 255, 0.04); border: 1px solid var(--board-line);
+  border-radius: 6px; padding: 0.5rem 0.7rem;
+}
+.cmd code {
+  font-family: var(--font-mono); font-size: 0.82rem; color: var(--amber);
+  overflow-wrap: anywhere; flex: 1;
+}
+.cmd .cmt { color: var(--board-dim); font-size: 0.74rem; }
+.cmd-copy {
+  flex: none; font-family: var(--font-mono); font-size: 0.7rem; cursor: pointer;
+  background: transparent; color: var(--board-dim); border: 1px solid var(--board-line);
+  border-radius: 4px; padding: 0.25rem 0.55rem;
+}
+.cmd-copy:hover { color: var(--amber); border-color: var(--amber); }
+.cmd-copy.copied { color: var(--board); background: var(--amber); border-color: var(--amber); }
+@media (pointer: coarse) {
+  .cmd-copy { min-height: 2.75rem; padding: 0.35rem 0.7rem; }
+}
+/* Visually hidden live region for the copy confirmation ------------------ */
+.copy-status {
+  position: absolute; width: 1px; height: 1px; margin: -1px;
+  padding: 0; border: 0; overflow: hidden;
+  clip-path: inset(50%); white-space: nowrap;
+}
+.ticket-note { margin-top: 0.9rem; font-size: 0.8rem; line-height: 1.55; }
+.ticket-note code { font-family: var(--font-mono); font-size: 0.74rem; color: var(--amber); }
+
+/* Sections ----------------------------------------------------------------- */
+.section { padding-block: 3.4rem; border-top: 3px solid var(--ink); }
+.section-head { max-width: 42rem; margin-bottom: 1.8rem; }
+h2 {
+  font-family: var(--font-display); font-weight: 700; text-transform: uppercase;
+  font-size: clamp(1.7rem, 3.5vw, 2.3rem); line-height: 1.05; letter-spacing: 0.01em;
+}
+.section-head p { margin-top: 0.6rem; color: var(--muted); }
+.section-head code { font-family: var(--font-mono); font-size: 0.9em; }
+
+/* Departure board ----------------------------------------------------------- */
+.board {
+  background: var(--board); border-radius: 10px; padding: 1.4rem 1.3rem 1.2rem;
+  color: var(--amber); box-shadow: 0 14px 40px rgba(16, 27, 51, 0.22);
+  overflow-x: auto;
+}
+.board-title {
+  display: flex; align-items: baseline; gap: 0.8rem; flex-wrap: wrap;
+  font-family: var(--font-display); font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.08em; font-size: 1.2rem; color: var(--amber);
+  margin-bottom: 1rem;
+}
+.board-title small {
+  font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.05em;
+  color: var(--board-dim); text-transform: none;
+}
+.board-grid { min-width: 46rem; }
+.board-cols, .board-row {
+  display: grid; gap: 1rem;
+  grid-template-columns: 11.5rem minmax(18rem, 1fr) 5.5rem 8.5rem;
+  align-items: baseline;
+}
+.board-cols {
+  font-family: var(--font-mono); font-size: 0.7rem; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--board-dim);
+  border-bottom: 2px solid var(--board-line); padding-bottom: 0.5rem;
+}
+.board-list { list-style: none; }
+.board-row {
+  padding-block: 0.65rem; border-bottom: 1px solid var(--board-line);
+  animation: flap-in 0.45s both; animation-delay: calc(var(--i) * 55ms);
+}
+.board-list li:last-child { border-bottom: 0; }
+@keyframes flap-in { from { opacity: 0; transform: translateY(5px); } }
+.repo {
+  font-family: var(--font-mono); font-weight: 600; font-size: 0.92rem;
+  text-transform: uppercase; letter-spacing: 0.03em; color: var(--amber);
+  overflow-wrap: anywhere;
+}
+.repo a { color: inherit; text-decoration: none; }
+.repo a:hover { text-decoration: underline; text-decoration-color: var(--board-dim); }
+.board-row .desc { color: var(--board-dim); font-size: 0.88rem; line-height: 1.45; }
+.count {
+  font-family: var(--font-mono); font-weight: 600; font-size: 0.95rem;
+  color: var(--board); background: var(--amber); border-radius: 4px;
+  padding: 0.1rem 0.5rem; justify-self: start;
+}
+.count.zero { background: transparent; color: var(--board-dim); border: 1px solid var(--board-line); }
+.status { font-family: var(--font-mono); font-size: 0.74rem; letter-spacing: 0.08em; color: var(--board-dim); }
+.status.on { color: var(--amber); }
+.board-legend {
+  margin-top: 1rem; font-family: var(--font-mono); font-size: 0.72rem;
+  color: var(--board-dim); line-height: 1.6;
+}
+.board-legend b { color: var(--amber); font-weight: 600; }
+
+/* Route (pipeline) ----------------------------------------------------------- */
+.steps {
+  list-style: none; display: grid; gap: 1.6rem;
+  grid-template-columns: repeat(3, 1fr); counter-reset: stop;
+}
+.steps li {
+  counter-increment: stop; border-top: 3px solid var(--ink);
+  padding-top: 1.5rem; position: relative;
+}
+.steps li::before {
+  content: counter(stop, decimal-leading-zero);
+  position: absolute; top: -0.95rem; left: 0;
+  width: 1.9rem; height: 1.9rem; border-radius: 50%;
+  background: var(--ink); color: var(--concourse);
+  font-family: var(--font-mono); font-weight: 600; font-size: 0.78rem;
+  display: flex; align-items: center; justify-content: center;
+}
+.steps h3 {
+  font-family: var(--font-display); font-weight: 600; text-transform: uppercase;
+  font-size: 1.25rem; letter-spacing: 0.03em; margin-left: 2.4rem;
+}
+.steps p { margin-top: 0.45rem; font-size: 0.92rem; color: var(--muted); }
+.steps code { font-family: var(--font-mono); font-size: 0.82em; color: var(--ink); }
+
+/* Targets --------------------------------------------------------------------- */
+.targets { display: grid; gap: 1.2rem; grid-template-columns: repeat(3, 1fr); }
+.target {
+  background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+  padding: 1.3rem 1.3rem 1.1rem;
+}
+.target h3 {
+  font-family: var(--font-display); font-weight: 700; text-transform: uppercase;
+  font-size: 1.5rem; letter-spacing: 0.02em;
+}
+.target .artifact {
+  display: inline-block; margin-top: 0.3rem; font-family: var(--font-mono);
+  font-size: 0.74rem; color: var(--signal); background: var(--concourse);
+  border: 1px solid var(--line); border-radius: 4px; padding: 0.15rem 0.45rem;
+}
+.target p { margin-top: 0.8rem; font-size: 0.92rem; color: var(--muted); }
+.target p + p { margin-top: 0.5rem; }
+.target code { font-family: var(--font-mono); font-size: 0.84em; color: var(--ink); }
+.target .guarantee { color: var(--ink); font-weight: 500; }
+
+/* Footer ------------------------------------------------------------------------ */
+.footer { border-top: 3px solid var(--ink); padding-block: 2.2rem 2.6rem; }
+.footer-inner { display: flex; flex-wrap: wrap; gap: 1rem 2.5rem; align-items: baseline; }
+.footer p { font-size: 0.88rem; color: var(--muted); max-width: 30rem; }
+.footer-links { list-style: none; display: flex; flex-wrap: wrap; gap: 0.4rem 1.4rem; font-size: 0.9rem; }
+.footer-links a { font-weight: 500; }
+
+/* Responsive ---------------------------------------------------------------------- */
+@media (max-width: 56rem) {
+  .hero-grid { grid-template-columns: 1fr; gap: 2rem; }
+  .steps { grid-template-columns: 1fr 1fr; }
+  .targets { grid-template-columns: 1fr; }
+}
+@media (max-width: 40rem) {
+  .masthead-meta { width: 100%; order: 3; }
+  .steps { grid-template-columns: 1fr; }
+  .board { padding: 1.1rem 0.9rem; }
+  .board-cols { display: none; }
+  .board-grid { min-width: 0; }
+  .board-row {
+    grid-template-columns: 1fr auto; grid-template-areas: "repo status" "count count" "desc desc";
+    row-gap: 0.35rem;
+  }
+  .repo { grid-area: repo; }
+  .desc { grid-area: desc; }
+  .count { grid-area: count; }
+  .status { grid-area: status; justify-self: end; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="masthead">
+  <div class="wrap masthead-inner">
+    <p class="wordmark">skill<span>·</span>router</p>
+    <p class="masthead-meta">14 repos pinned · 85 skills routed · 3 targets wired</p>
+    <nav class="masthead-nav" aria-label="Page sections">
+      <a href="#board">Departures</a>
+      <a href="#route">Route</a>
+      <a href="#targets">Terminals</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+
+  <section class="hero wrap" aria-labelledby="hero-h">
+    <div class="hero-grid">
+      <div>
+        <p class="eyebrow">A switchboard for agent skills</p>
+        <h1 id="hero-h">One <span class="no-break">clean-room</span> agent per skill repo</h1>
+        <p class="lede">
+          skill-router pins <strong>14 upstream skill repos</strong> and generates an
+          <strong>isolated agent for each</strong> — for pi, Mistral Vibe and Claude Code —
+          so an agent behaves like its repo's author intended, not like your whole
+          catalog. A catalog-driven router picks the best skill across all of them
+          and returns only the recommendation.
+        </p>
+        <ul class="hero-stats">
+          <li><b>14</b>pinned repos</li>
+          <li><b>85</b>skills on the board</li>
+          <li><b>3</b>targets wired</li>
+        </ul>
+      </div>
+
+      <div class="ticket">
+        <h2 class="ticket-head" id="ticket-h">Install</h2>
+        <ul class="cmds">
+          <li class="cmd">
+            <code>git clone https://github.com/lbijeau/skill-router ~/repositories/skill-router</code>
+            <button class="cmd-copy" type="button">Copy</button>
+          </li>
+          <li class="cmd">
+            <code>cd ~/repositories/skill-router</code>
+            <button class="cmd-copy" type="button">Copy</button>
+          </li>
+          <li class="cmd">
+            <code>./install.sh install</code>
+            <span class="cmt">clone, generate, wire</span>
+            <button class="cmd-copy" type="button">Copy</button>
+          </li>
+          <li class="cmd">
+            <code>./install.sh update</code>
+            <span class="cmt">pull, regenerate, deltas</span>
+            <button class="cmd-copy" type="button">Copy</button>
+          </li>
+          <li class="cmd">
+            <code>./install.sh status</code>
+            <span class="cmt">read-only health table</span>
+            <button class="cmd-copy" type="button">Copy</button>
+          </li>
+        </ul>
+        <p class="ticket-note">
+          After install, run <code>/reload</code> in pi and Vibe. Claude Code needs
+          one restart if <code>~/.claude/agents/</code> is new; pass
+          <code>--no-claude</code> to skip all Claude Code changes.
+        </p>
+        <p class="copy-status" id="copy-status" role="status" aria-live="polite"></p>
+      </div>
+    </div>
+  </section>
+
+  <section id="board" class="section" aria-labelledby="board-h">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Departures</p>
+        <h2 id="board-h">The pinned upstream repos</h2>
+        <p>
+          Every row is a shallow clone with one generated agent per target,
+          restricted to exactly that repo's skills. Names link to the upstream
+          projects where one exists; their licenses are listed in ATTRIBUTIONS.md.
+        </p>
+      </div>
+
+      <div class="board">
+        <p class="board-title">Skill departures <small>rebuilt on every install / update</small></p>
+        <div class="board-grid">
+          <div class="board-cols">
+            <span>Repo</span><span>What it carries</span><span>Skills</span><span>Status</span>
+          </div>
+          <ul class="board-list">
+            <li class="board-row" style="--i:0">
+              <span class="repo"><a href="https://github.com/DietrichGebert/ponytail">ponytail</a></span>
+              <span class="desc">Blunt, opinionated senior-engineer persona</span>
+              <span class="count" aria-label="6 skills">6</span>
+              <span class="status on" aria-label="Status: boarding">BOARDING</span>
+            </li>
+            <li class="board-row" style="--i:1">
+              <span class="repo"><a href="https://github.com/mattpocock/skills">mattpocock</a></span>
+              <span class="desc">Matt Pocock's engineering workflows: research, design, TDD, PRs</span>
+              <span class="count" aria-label="31 skills">31</span>
+              <span class="status on" aria-label="Status: boarding">BOARDING</span>
+            </li>
+            <li class="board-row" style="--i:2">
+              <span class="repo"><a href="https://github.com/ayghri/i-have-adhd">i-have-adhd</a></span>
+              <span class="desc">ADHD-friendly execution: smallest next step, visible progress, momentum</span>
+              <span class="count" aria-label="1 skills">1</span>
+              <span class="status on" aria-label="Status: boarding">BOARDING</span>
+            </li>
+            <li class="board-row" style="--i:3">
+              <span class="repo"><a href="https://github.com/cloudflare/security-audit-skill">security-audit</a></span>
+              <span class="desc">Cloudflare's security-audit skill: threat-model and audit code</span>
+              <span class="count" aria-label="1 skills">1</span>
+              <span class="status on" aria-label="Status: boarding">BOARDING</span>
+            </li>
+            <li class="board-row" style="--i:4">
+              <span class="repo"><a href="https://github.com/obra/superpowers">superpowers</a></span>
+              <span class="desc">Superpowers: brainstorm, spec, plan, TDD delivery discipline</span>
+              <span class="count" aria-label="15 skills">15</span>
+              <span class="status on" aria-label="Status: boarding">BOARDING</span>
+            </li>
+            <li class="board-row" style="--i:5">
+              <span class="repo"><a href="https://github.com/cathrynlavery/diagram-design">diagram-design</a></span>
+              <span class="desc">Diagram design guidance for clear visual explanations</span>
+              <span class="count" aria-label="1 skills">1</span>
+              <span class="status on" aria-label="Status: boarding">BOARDING</span>
+            </li>
+            <li class="board-row" style="--i:6">
+              <span class="repo"><a href="https://github.com/blader/humanizer">humanizer</a></span>
+              <span class="desc">Rewrites AI-sounding prose so it reads like a person wrote it</span>
+              <span class="count" aria-label="1 skills">1</span>
+              <span class="status on" aria-label="Status: boarding">BOARDING</span>
+            </li>
+            <li class="board-row" style="--i:7">
+              <span class="repo"><a href="https://github.com/Graphify-Labs/graphify">graphify</a></span>
+              <span class="desc">Graphify — placeholder; upstream ships no skills yet</span>
+              <span class="count zero" aria-label="0 skills">0</span>
+              <span class="status" aria-label="Status: scheduled">SCHEDULED</span>
+            </li>
+            <li class="board-row" style="--i:8">
+              <span class="repo"><a href="https://github.com/addyosmani/agent-skills">addyosmani</a></span>
+              <span class="desc">Addy Osmani's engineering skills: architecture, performance, shipping</span>
+              <span class="count" aria-label="25 skills">25</span>
+              <span class="status on" aria-label="Status: boarding">BOARDING</span>
+            </li>
+            <li class="board-row" style="--i:9">
+              <span class="repo"><a href="https://github.com/pbakaus/impeccable">impeccable</a></span>
+              <span class="desc">Impeccable: relentless polish toward near-perfect software</span>
+              <span class="count" aria-label="1 skills">1</span>
+              <span class="status on" aria-label="Status: boarding">BOARDING</span>
+            </li>
+            <li class="board-row" style="--i:10">
+              <span class="repo"><a href="https://github.com/wheresryan22/anatomy">anatomy</a></span>
+              <span class="desc">Interactive isometric SVG/WebGL illustrations of machines and complex systems</span>
+              <span class="count" aria-label="1 skills">1</span>
+              <span class="status on" aria-label="Status: boarding">BOARDING</span>
+            </li>
+            <li class="board-row" style="--i:11">
+              <span class="repo"><a href="https://github.com/Leonxlnx/taste-skill">taste-skill</a></span>
+              <span class="desc">Design taste for coding agents: art direction, references, browser-checked pages</span>
+              <span class="count" aria-label="1 skills">1</span>
+              <span class="status on" aria-label="Status: boarding">BOARDING</span>
+            </li>
+            <li class="board-row" style="--i:12">
+              <span class="repo"><a href="https://github.com/Nutlope/hallmark">hallmark</a></span>
+              <span class="desc">Anti-AI-slop design skill: themed, goal-driven pages linted in a real browser</span>
+              <span class="count" aria-label="1 skills">1</span>
+              <span class="status on" aria-label="Status: boarding">BOARDING</span>
+            </li>
+            <li class="board-row" style="--i:13">
+              <span class="repo">anatomy-experiments</span>
+              <span class="desc">Local anatomy illustration experiments (this repo, file:// source)</span>
+              <span class="count zero" aria-label="0 skills">0</span>
+              <span class="status" aria-label="Status: scheduled">SCHEDULED</span>
+            </li>
+          </ul>
+        </div>
+        <p class="board-legend">
+          <b>BOARDING</b> — agent generated and wired for all three targets.
+          <b>SCHEDULED</b> — manifest entry kept; upstream ships no skills yet, the agent appears when they do.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section id="route" class="section" aria-labelledby="route-h">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Route</p>
+        <h2 id="route-h">How a repo becomes an agent</h2>
+        <p>Six stops, run end to end by <code>./install.sh install</code> or <code>update</code>. Everything is derived from one manifest; nothing is configured twice.</p>
+      </div>
+      <ol class="steps">
+        <li>
+          <h3>Manifest</h3>
+          <p><code>repos.json</code> holds one entry per repo: name, url, description, persona, plus optional <code>skillSource</code> / <code>pathExclude</code> curation. The single source of truth.</p>
+        </li>
+        <li>
+          <h3>Clone</h3>
+          <p>Each repo is shallow-cloned into <code>skills/&lt;name&gt;/</code> — gitignored, never committed. <code>update</code> pulls <code>--ff-only</code>; a failed pull leaves the clone as-is.</p>
+        </li>
+        <li>
+          <h3>Discover</h3>
+          <p>Every clone is walked for directories containing <code>SKILL.md</code>; frontmatter is parsed and the curation rules applied. Skills are deduped by name.</p>
+        </li>
+        <li>
+          <h3>Generate</h3>
+          <p>One agent per repo, restricted to that repo's skills: pi markdown, Vibe TOML, Claude Code markdown. A repo with zero skills gets no agent — its entry is kept for later.</p>
+        </li>
+        <li>
+          <h3>Wire</h3>
+          <p>Idempotent settings edits, always with a <code>.bak</code> backup: pi <code>agentScanDirs</code>, Vibe <code>agent_paths</code> plus read allowlist, Claude Code agents dir and two <code>Read</code> permissions.</p>
+        </li>
+        <li>
+          <h3>Catalog + router</h3>
+          <p><code>catalog/skill-catalog.md</code> is rebuilt every run. The <code>route-skill</code> router reads it, opens the winning <code>SKILL.md</code>, and returns only the recommendation — the catalog's bulk never enters your session.</p>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <section id="targets" class="section" aria-labelledby="targets-h">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Terminals</p>
+        <h2 id="targets-h">Three targets, three kinds of clean room</h2>
+        <p>Each target receives its own generated artifacts. How complete the isolation is differs per tool.</p>
+      </div>
+      <div class="targets">
+        <article class="target">
+          <h3>pi</h3>
+          <p class="artifact">agents/&lt;name&gt;.md</p>
+          <p class="guarantee">The agent loads exactly its repo's skills — never your catalog.</p>
+          <p>Generated with <code>inheritSkills: false</code>, an explicit <code>skills:</code> list and <code>skillPath: ../skills/&lt;name&gt;</code>. Wiring adds <code>subagents.agentScanDirs</code> to your settings, so every agent is spawnable from any project.</p>
+        </article>
+        <article class="target">
+          <h3>Mistral Vibe</h3>
+          <p class="artifact">agents-vibe/&lt;name&gt;.toml</p>
+          <p class="guarantee">The subagent cannot load the parent's skill catalog.</p>
+          <p>Each TOML sets <code>agent_type = "subagent"</code> and <code>disabled_tools = ["skill"]</code> — that is the clean room. Its skill table uses <code>~</code>-anchored paths, and depth-pattern read allowlist entries auto-approve clone reads from any project.</p>
+        </article>
+        <article class="target">
+          <h3>Claude Code</h3>
+          <p class="artifact">agents-claude/&lt;name&gt;.md</p>
+          <p class="guarantee">Only <code>Read</code>, <code>Grep</code> and <code>Glob</code> — and no <code>CLAUDE.md</code>.</p>
+          <p>No Skill tool, no MCP, no Bash; skills are read as plain files from this checkout. Verified by a live probe, not a guarantee — re-check after Claude Code upgrades. The installer only writes files it owns, marked with a generated-by marker.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer class="footer">
+  <div class="wrap footer-inner">
+    <p>skill-router</p>
+    <ul class="footer-links">
+      <li><a href="https://github.com/lbijeau/skill-router">GitHub repo</a></li>
+      <li><a href="https://github.com/lbijeau/skill-router/blob/master/ATTRIBUTIONS.md">ATTRIBUTIONS.md</a></li>
+      <li><a href="https://github.com/lbijeau/skill-router/blob/master/docs/ARCHITECTURE.md">Architecture</a></li>
+      <li><a href="https://github.com/lbijeau/skill-router/tree/master/docs/decisions">Decision records</a></li>
+      <li><a href="https://github.com/lbijeau/skill-router/issues">Issues</a></li>
+    </ul>
+  </div>
+</footer>
+
+<script>
+(function () {
+  document.querySelectorAll(".cmd-copy").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var line = btn.closest(".cmd").querySelector("code").textContent;
+      var status = document.getElementById("copy-status");
+      function done() {
+        btn.textContent = "Copied";
+        btn.classList.add("copied");
+        status.textContent = "Copied: " + line;
+        setTimeout(function () {
+          btn.textContent = "Copy";
+          btn.classList.remove("copied");
+          status.textContent = "";
+        }, 1600);
+      }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(line).then(done, done);
+      } else {
+        var t = document.createElement("textarea");
+        t.value = line;
+        document.body.appendChild(t);
+        t.select();
+        try { document.execCommand("copy"); } catch (e) {}
+        document.body.removeChild(t);
+        done();
+      }
+    });
+  });
+})();
+</script>
+</body>
+</html>

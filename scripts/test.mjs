@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import assert from "node:assert";
+import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import * as gen from "./generate.mjs";
 
@@ -2563,6 +2564,18 @@ test("runCli: a custom root needs a home, CLAUDE_CONFIG_DIR or --no-claude as we
     eq(fs.existsSync(path.join(cfg, "agents/a.md")), true);
   } finally { process.env.HOME = saved; }
   clean(f.root); clean(f.claude); clean(cfg); clean(fakeHome);
+});
+
+test("landing page: masthead, lede and hero stats match repos.json, catalog and targets", () => {
+  const root = fileURLToPath(new URL("..", import.meta.url));
+  const html = fs.readFileSync(path.join(root, "index.html"), "utf8");
+  const repos = JSON.parse(fs.readFileSync(path.join(root, "repos.json"), "utf8")).repos.length;
+  const skills = fs.readFileSync(path.join(root, "catalog/skill-catalog.md"), "utf8")
+    .split("\n").filter(l => l.startsWith("- ")).length;
+  eq(html.includes(`${repos} repos pinned · ${skills} skills routed · 3 targets wired`), true);
+  eq(html.includes(`<b>${repos}</b>pinned repos`), true);
+  eq(html.includes(`<b>${skills}</b>skills on the board`), true);
+  eq(html.includes("<b>3</b>targets wired"), true);
 });
 
 process.exitCode = await (async () => {
