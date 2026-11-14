@@ -1,4 +1,3 @@
----
 name: Pin request
 description: Propose a third-party skills repo for the manifest
 labels: ["pin-request"]
@@ -53,4 +52,3 @@ body:
           required: true
         - label: The skill descriptions and persona text will be shown verbatim to generated agents, and I am comfortable vouching for this repo's content.
           required: true
----

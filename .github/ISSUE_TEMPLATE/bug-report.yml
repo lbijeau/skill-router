@@ -1,4 +1,3 @@
----
 name: Bug report
 description: Something in install / update / status misbehaves
 labels: ["bug"]
@@ -60,4 +59,3 @@ body:
       options:
         - label: "Yes — I have local-only entries in repos.local.json (this changes generation behavior)"
           required: false
----
