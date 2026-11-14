@@ -15,16 +15,15 @@ overview of the same material.
 
 ## Why a clean room
 
-Skills are files on disk. A spawned per-repo agent reads its repo's
-`SKILL.md` files itself — your main session's context never sees the skill
-bodies, only the agent's answer. The router works the same way: it reads
-the catalog and hands back a recommendation (name, path, digest), not the
-catalog's bulk.
+Skills are files on disk, and the spawned agent is the one that reads them —
+that's what keeps the bodies out of your main session. The router works the
+same way: it reads the catalog and hands back a recommendation (name, path,
+digest), not the catalog's bulk.
 
-The clean room is enforced, not aspirational. By default: pi agents get
-`inheritSkills: false` plus a read-only tools allowlist; Vibe agents get
-`disabled_tools = ["skill"]` plus an `enabled_tools` allowlist; Claude Code
-agents get `Read`, `Grep`, `Glob` only. Tool policy is set per repo — see
+Default tool restrictions back this up: pi agents get
+`inheritSkills: false`, Vibe agents get `disabled_tools = ["skill"]`, and
+Claude Code agents are capped to three read tools. The actual allowlists are
+a separate per-repo policy — see [Trust model](#trust-model) and
 [ADR-006](docs/decisions/ADR-006-per-repo-tool-policy-for-generated-agents.md).
 
 ## Quickstart

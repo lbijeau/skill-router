@@ -25,8 +25,11 @@ flowchart TD
 ```
 
 1. **Manifest** — `repos.json`: one entry per repo with `name`, `url`,
-   `description`, `persona`, and optional `skillSource` / `pathExclude`
-   curation. Validated by `loadManifest` (names, required fields, URL shape).
+   `description`, `persona`, and optional `skillSource` / `pathExclude` /
+   `tools` curation. Validated by `loadManifest` (names, required fields, URL
+   shape). An optional gitignored `repos.local.json` overlays machine-local
+   entries (same validation, name collisions are a load error); overlay
+   entries generate local agents but stay out of the committed catalog.
    Single source of truth — see ADR-003.
 2. **Clone** — `install`/`update` shallow-clone each repo into
    `skills/<name>/` (gitignored, never committed — ADR-002). `update` pulls
