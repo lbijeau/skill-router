@@ -9,7 +9,9 @@ the Claude Code limits are listed under
 [Claude Code isolation](#claude-code-isolation).
 
 The pinned upstream projects and their licenses are listed in
-[ATTRIBUTIONS.md](ATTRIBUTIONS.md).
+[ATTRIBUTIONS.md](ATTRIBUTIONS.md). This README is the source of truth; the
+landing page at <https://lbijeau.github.io/skill-router/> is a friendly
+overview of the same material.
 
 ## Why a clean room
 
