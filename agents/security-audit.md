@@ -2,6 +2,7 @@
 name: security-audit
 description: "Cloudflare's security-audit skill: threat-model and audit code"
 inheritSkills: false
+tools: read, grep, find, ls
 skills: security-audit
 skillPath: ../skills/security-audit
 ---

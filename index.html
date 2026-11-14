@@ -536,14 +536,14 @@ h2 {
         <article class="target">
           <h3>pi</h3>
           <p class="artifact">agents/&lt;name&gt;.md</p>
-          <p class="guarantee">The agent loads exactly its repo's skills — never your catalog.</p>
-          <p>Generated with <code>inheritSkills: false</code>, an explicit <code>skills:</code> list and <code>skillPath: ../skills/&lt;name&gt;</code>. Wiring adds <code>subagents.agentScanDirs</code> to your settings, so every agent is spawnable from any project.</p>
+          <p class="guarantee">The agent loads exactly its repo's skills — never your catalog — and is tool-restricted to read-only by default.</p>
+          <p>Generated with <code>inheritSkills: false</code>, an explicit <code>skills:</code> list and <code>skillPath: ../skills/&lt;name&gt;</code>. Unless the manifest marks the repo <code>"tools": "full"</code>, it also gets <code>tools: read, grep, find, ls</code> — no shell exec, no file write. Wiring adds <code>subagents.agentScanDirs</code> to your settings, so every agent is spawnable from any project.</p>
         </article>
         <article class="target">
           <h3>Mistral Vibe</h3>
           <p class="artifact">agents-vibe/&lt;name&gt;.toml</p>
-          <p class="guarantee">The subagent cannot load the parent's skill catalog.</p>
-          <p>Each TOML sets <code>agent_type = "subagent"</code> and <code>disabled_tools = ["skill"]</code> — that is the clean room. Its skill table uses <code>~</code>-anchored paths, and depth-pattern read allowlist entries auto-approve clone reads from any project.</p>
+          <p class="guarantee">The subagent cannot load the parent's skill catalog, and is tool-restricted to read-only by default.</p>
+          <p>Each TOML sets <code>agent_type = "subagent"</code> and <code>disabled_tools = ["skill"]</code> — that is the clean room. Unless the manifest marks the repo <code>"tools": "full"</code>, it also gets <code>enabled_tools = ["read_file", "grep"]</code> — no shell exec, no file write. Its skill table uses <code>~</code>-anchored paths, and depth-pattern read allowlist entries auto-approve clone reads from any project.</p>
         </article>
         <article class="target">
           <h3>Claude Code</h3>

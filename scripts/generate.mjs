@@ -20,6 +20,13 @@ const GIT_TIMEOUT_MS = 300_000;
 
 const URL_RE = /^(https:\/\/[\w.-]+(?:\/[\w._~-]+)+\/?|file:\/\/\/[\w.~\/-]+)$/;
 
+// Per-repo trust decision for the generated pi/Vibe agents: "read-only"
+// (default) gets the hardened allowlist below; "full" keeps today's
+// full-tool-set behavior for personas whose skills genuinely edit files or run
+// commands (see repos.json for which repos are marked "full" and why). This
+// is a maintainer-reviewed, per-repo flag, not an automatic inference.
+const TOOLS_POLICIES = new Set(["read-only", "full"]);
+
 function validateManifestEntry(entry, seen) {
   if (typeof entry.name !== "string" || !NAME_RE.test(entry.name) || entry.name.length > 64) {
     throw new Error(`invalid name: ${JSON.stringify(entry?.name)}`);
@@ -28,6 +35,9 @@ function validateManifestEntry(entry, seen) {
     if (typeof entry[field] !== "string" || entry[field].length === 0) {
       throw new Error(`${entry.name}: missing ${field}`);
     }
+  }
+  if (entry.tools !== undefined && !TOOLS_POLICIES.has(entry.tools)) {
+    throw new Error(`${entry.name}: tools must be "read-only" or "full"`);
   }
   if (entry.pathExclude !== undefined) {
     if (!Array.isArray(entry.pathExclude)
@@ -96,12 +106,26 @@ export function loadManifest(root) {
   return { repos };
 }
 
+// pi's "tools:" frontmatter key is a strict child allowlist; omitting it gives
+// the child pi's normal builtin tools, which per pi-subagents/docs/agents.md
+// ("Tool and extension selection") and pi-coding-agent/docs/cli.md are
+// read, bash, edit and write — full shell exec and file write, not a narrow
+// read-only set. pi has no separate Glob tool: `find` is its glob-pattern
+// path finder, so `read, grep, find, ls` is pi's closest equivalent to the
+// Claude path's `Read, Grep, Glob` allowlist (verified against
+// pi-subagents/docs/agents.md's own `tools: read, grep, find, ls` example and
+// the scout builtin agent, and against pi-coding-agent/docs/cli.md's builtin
+// tool table).
+export const PI_READONLY_TOOLS_LINE = "tools: read, grep, find, ls";
+
 export function renderAgentFile(entry, skillNames) {
+  const toolsLine = entry.tools === "full" ? [] : [PI_READONLY_TOOLS_LINE];
   return [
     "---",
     `name: ${entry.name}`,
     `description: ${yamlQuote(entry.description)}`,
     "inheritSkills: false",
+    ...toolsLine,
     `skills: ${skillNames.join(", ")}`,
     `skillPath: ../skills/${entry.name}`,
     "---",
@@ -123,14 +147,32 @@ function tomlEscape(s) {
   return s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
 
+// Vibe's "enabled_tools" is an explicit allowlist ("only these tools will be
+// active", vibe/core/config/vibe_schema.py); without it an unannotated
+// subagent gets the host's full default tool set (read_file, write_file,
+// edit, bash/git_bash/powershell, grep, skill, ...) minus whatever
+// disabled_tools removes — shell exec and file write included.
+// `disabled_tools = ["skill"]` alone (today's clean room) only blocks the
+// parent's skill-loading tool, not general capability. Vibe has no separate
+// glob/find tool, so `read_file` + `grep` is its closest equivalent to the
+// Claude path's `Read, Grep, Glob` allowlist — confirmed against the
+// installed mistral_vibe package's own `explore` builtin subagent profile
+// (vibe/core/agents/models.py: `enabled_tools: ["grep", "read_file",
+// "skill"]`), minus "skill" per this project's clean room.
+export const VIBE_READONLY_ENABLED_TOOLS = ["read_file", "grep"];
+
 export function renderVibeAgentTOML(entry, skills, { home } = {}) {
   const homeDir = home ?? os.homedir();
   const description = tomlEscape(normalizeText(entry.description));
   const persona = tomlEscape(normalizeText(entry.persona, { keepNewlines: true }));
   const rows = skillRows(skills ?? [], homeDir, tomlEscape);
+  const enabledToolsLine = entry.tools === "full"
+    ? []
+    : [`enabled_tools = [${VIBE_READONLY_ENABLED_TOOLS.map(t => `"${t}"`).join(", ")}]`];
   return [
     'agent_type = "subagent"',
     `description = "${description}"`,
+    ...enabledToolsLine,
     'disabled_tools = ["skill"]',
     'instructions = """',
     persona,

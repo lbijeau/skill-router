@@ -2,6 +2,7 @@
 name: humanizer
 description: "Rewrites AI-sounding prose so it reads like a person wrote it"
 inheritSkills: false
+tools: read, grep, find, ls
 skills: humanizer
 skillPath: ../skills/humanizer
 ---

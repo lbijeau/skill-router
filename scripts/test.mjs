@@ -228,11 +228,24 @@ test("renderAgentFile: exact bytes, YAML-escaped description", () => {
 name: ponytail
 description: "Blunt: says \\"no\\""
 inheritSkills: false
+tools: read, grep, find, ls
 skills: ponytail, ponytail-review
 skillPath: ../skills/ponytail
 ---
 You are Ponytail.
 `);
+});
+
+test("renderAgentFile: tools=full omits the tools: allowlist line", () => {
+  const entry = { name: "x", description: "d", persona: "p", tools: "full" };
+  const out = gen.renderAgentFile(entry, ["a"]);
+  eq(out.includes("tools:"), false);
+});
+
+test("renderAgentFile: tools omitted or \"read-only\" emits the same allowlist", () => {
+  const base = { name: "x", description: "d", persona: "p" };
+  eq(gen.renderAgentFile(base, ["a"]), gen.renderAgentFile({ ...base, tools: "read-only" }, ["a"]));
+  eq(gen.renderAgentFile(base, ["a"]).includes(gen.PI_READONLY_TOOLS_LINE), true);
 });
 
 test("writeAgentFiles: writes, idempotent, removes zero-skill leftovers", () => {
@@ -742,6 +755,7 @@ test("renderVibeAgentTOML: exact bytes, one skill with description", () => {
   eq(gen.renderVibeAgentTOML(entry, [{ name: "core", dir, description: "does things" }]),
 `agent_type = "subagent"
 description = "Says \\"no\\""
+enabled_tools = ["read_file", "grep"]
 disabled_tools = ["skill"]
 instructions = """
 You are X.
@@ -751,6 +765,19 @@ ${gen.VIBE_BOILERPLATE}
 - core: does things — /abs/root/skills/x/core/SKILL.md
 """
 `);
+});
+
+test("renderVibeAgentTOML: tools=full omits enabled_tools but keeps disabled_tools", () => {
+  const entry = { name: "x", description: "d", persona: "p", tools: "full" };
+  const out = gen.renderVibeAgentTOML(entry, []);
+  eq(out.includes("enabled_tools"), false);
+  eq(out.includes('disabled_tools = ["skill"]'), true);
+});
+
+test("renderVibeAgentTOML: tools omitted or \"read-only\" emits the same enabled_tools", () => {
+  const base = { name: "x", description: "d", persona: "p" };
+  eq(gen.renderVibeAgentTOML(base, []), gen.renderVibeAgentTOML({ ...base, tools: "read-only" }, []));
+  eq(gen.renderVibeAgentTOML(base, []).includes('enabled_tools = ["read_file", "grep"]'), true);
 });
 
 test("renderVibeAgentTOML: name-only row when description null, multiple rows", () => {
@@ -1013,6 +1040,21 @@ test("loadManifest rejects skillSource escaping via backslash (cross-platform)",
   w(root, "repos.json", JSON.stringify({ repos: [
     { name: "a", url: "https://github.com/x/y", description: "d", persona: "p", skillSource: "..\\evil" }]}));
   assert.throws(() => gen.loadManifest(root), /skillSource/);
+  clean(root);
+});
+
+test("loadManifest accepts tools \"read-only\" and \"full\", rejects anything else", () => {
+  for (const tools of ["read-only", "full"]) {
+    const root = tmp();
+    w(root, "repos.json", JSON.stringify({ repos: [
+      { name: "a", url: "https://github.com/x/y", description: "d", persona: "p", tools }]}));
+    eq(gen.loadManifest(root).repos[0].tools, tools);
+    clean(root);
+  }
+  const root = tmp();
+  w(root, "repos.json", JSON.stringify({ repos: [
+    { name: "a", url: "https://github.com/x/y", description: "d", persona: "p", tools: "readonly" }]}));
+  assert.throws(() => gen.loadManifest(root), /a: tools must be "read-only" or "full"/);
   clean(root);
 });
 

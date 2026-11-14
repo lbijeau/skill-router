@@ -41,7 +41,7 @@ Then:
 
 - `repos.json` is the manifest — the single source of truth: one entry per
   repo with `name`, `url`, `description`, `persona`, and optional
-  `skillSource` / `pathExclude` curation.
+  `skillSource` / `pathExclude` / `tools` curation.
 - The `description` and `persona` text in `repos.json` comes from the
   upstream repo and is shown verbatim to the agents (in the generated agent
   files and the catalog) — only pin repos you trust.
@@ -56,7 +56,11 @@ Then:
   committed).
 - One agent definition is generated into `agents/<name>.md` (committed)
   with `inheritSkills: false`, an explicit `skills:` list of everything
-  discovered in the clone, and `skillPath: ../skills/<name>`.
+  discovered in the clone, and `skillPath: ../skills/<name>`. Unless the
+  manifest entry sets `"tools": "full"`, it also gets `tools: read, grep,
+  find, ls` — a strict pi allowlist with no shell exec and no file write
+  (pi's closest equivalent to the Claude path's `Read, Grep, Glob`; pi has
+  no separate glob tool, so `find` stands in).
 - `install`/`update` idempotently add
   `subagents.agentScanDirs: ["~/repositories/skill-router/agents"]` to
   `~/.pi/agent/settings.json`, making the agents discoverable everywhere.
@@ -68,6 +72,11 @@ Then:
   (`~`-relative) `SKILL.md` path — Vibe's file tools expanduser() every
   path at runtime, so the committed TOMLs carry no machine-specific
   usernames (checkouts outside the home dir fall back to absolute paths).
+  Unless the manifest entry sets `"tools": "full"`, it also gets
+  `enabled_tools = ["read_file", "grep"]` — Vibe's own allowlist key,
+  verified against the installed `mistral_vibe` package's `explore` builtin
+  subagent profile; Vibe has no separate glob/find tool, so `read_file` +
+  `grep` is its closest equivalent to the Claude path's `Read, Grep, Glob`.
 - Vibe wiring goes into `~/.vibe/config.toml` (or `$VIBE_HOME/config.toml`):
   `agent_paths` gains the `agents-vibe/` directory, and
   `[tools.read_file]` gains depth-pattern allowlist entries
@@ -109,12 +118,19 @@ Then:
 - `repos.json` pins a URL, not a commit. There is no SHA pinning or
   diff-before-apply today; `update` assumes upstream acts in good faith
   between pulls.
-- Claude Code agents are the only generated target with a tool allowlist
-  (`Read`, `Grep`, `Glob` — see
-  [Claude Code isolation](#claude-code-isolation)); pi and Vibe agents
-  inherit the host's full default tool set, shell and file write included.
-  Closing that gap is tracked separately (skill-router-yhj.14) and is out of
-  scope here.
+- Every generated target defaults a repo's agent to a read-only tool
+  allowlist: pi gets `tools: read, grep, find, ls`, Vibe gets
+  `enabled_tools = ["read_file", "grep"]`, and Claude Code gets
+  `tools: Read, Grep, Glob` (see
+  [Claude Code isolation](#claude-code-isolation)) — no shell exec, no file
+  write, for any target, by default. A manifest entry can set `"tools":
+  "full"` to opt a repo's pi and Vibe agents out of that allowlist back to
+  the host's normal full tool set, for personas whose skills genuinely edit
+  files or run commands (see `repos.json` for which repos are marked
+  `full`). Setting it is a maintainer decision made by reading the repo's
+  actual `SKILL.md` bodies in a reviewed commit; the generator never infers
+  it automatically. Claude Code agents have no `full` opt-out; they stay
+  `Read`, `Grep`, `Glob` regardless of the manifest.
 
 ## Code layout
 
@@ -204,6 +220,14 @@ Edit `repos.json` and rerun `./install.sh update`:
 - `pathExclude` — globstar patterns (`*` within one segment, `**` across
   segments) dropping skill dirs by clone-relative path, e.g. `mattpocock`
   → `["skills/in-progress/**"]`.
+- `tools` — `"read-only"` (the default when omitted) or `"full"`. Sets the
+  pi `tools:` and Vibe `enabled_tools` allowlist on the generated agent:
+  `"read-only"` gets `read, grep, find, ls` (pi) and `["read_file",
+  "grep"]` (Vibe); `"full"` omits the allowlist, so the agent keeps the
+  host's normal full tool set, shell exec and file write included. Mark a
+  repo `"full"` only when its skills genuinely need to edit files or run
+  commands to do their job — check the actual `SKILL.md` bodies, not just
+  the one-line persona, before marking a new pin `"full"`.
 
 ## Safety
 
