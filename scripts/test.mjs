@@ -9,13 +9,18 @@ import * as gen from "./generate.mjs";
 const tests = [];
 function test(name, fn) { tests.push({ name, fn }); }
 function eq(a, e, msg) { msg === undefined ? assert.strictEqual(a, e) : assert.strictEqual(a, e, msg); }
-function tmp() { return fs.mkdtempSync(path.join(os.tmpdir(), "sr-")); }
+const liveTmpDirs = new Set();
+function tmp() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sr-"));
+  liveTmpDirs.add(dir);
+  return dir;
+}
 function w(root, rel, content) {
   const file = path.join(root, rel);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, content);
 }
-function clean(dir) { fs.rmSync(dir, { recursive: true, force: true }); }
+function clean(dir) { fs.rmSync(dir, { recursive: true, force: true }); liveTmpDirs.delete(dir); }
 
 test("loadManifest returns entries with optional fields", () => {
   const root = tmp();
@@ -352,6 +357,41 @@ test("mergeSettings: equivalent ~ entry means already configured", () => {
   const r = gen.mergeSettings(sp, repoRoot);
   eq(r.changed, false);
   clean(root);
+});
+
+test("mergeSettings: refuses an agents dir under the system temp dir", () => {
+  // Stub os.tmpdir so `root` counts as temp while the settings file (in `holder`)
+  // counts as persistent — the exact real-world leak scenario from issue #11.
+  const root = tmp(); const holder = tmp();
+  const sp = path.join(holder, "settings.json");
+  w(holder, "settings.json", JSON.stringify({ something: "else" }));
+  const before = fs.readFileSync(sp, "utf8");
+  const origTmpdir = os.tmpdir; os.tmpdir = () => root;
+  let r;
+  try { r = gen.mergeSettings(sp, root); }
+  finally { os.tmpdir = origTmpdir; }
+  eq(r.changed, false);
+  eq(r.error, "refusing to register an agents dir under the system temp dir");
+  eq(fs.readFileSync(sp, "utf8"), before); // file untouched
+});
+
+test("mergeSettings: prunes existing temp-dir entries from agentScanDirs", () => {
+  const root = tmp(); const holder = tmp();
+  const sp = path.join(holder, "settings.json");
+  const stale = path.join(root, "sr-leaked", "agents");
+  const repoRoot = path.join(os.homedir(), "repositories", "skill-router");
+  w(holder, "settings.json", JSON.stringify(
+    { subagents: { agentScanDirs: [stale, "~/nope/agents"] } }));
+  const origTmpdir = os.tmpdir; os.tmpdir = () => root;
+  let r;
+  try { r = gen.mergeSettings(sp, repoRoot); }
+  finally { os.tmpdir = origTmpdir; }
+  eq(r.changed, true);
+  const j = JSON.parse(fs.readFileSync(sp, "utf8"));
+  eq(j.subagents.agentScanDirs.length, 2); // stale gone, ~nope kept, repo added
+  eq(j.subagents.agentScanDirs.includes(stale), false);
+  eq(j.subagents.agentScanDirs.includes("~/nope/agents"), true);
+  eq(j.subagents.agentScanDirs.includes("~/repositories/skill-router/agents"), true);
 });
 
 test("mergeSettings: unparseable file is never touched", () => {
@@ -2527,9 +2567,14 @@ test("runCli: a custom root needs a home, CLAUDE_CONFIG_DIR or --no-claude as we
 
 process.exitCode = await (async () => {
   let failed = 0;
-  for (const t of tests) {
-    try { await t.fn(); console.log("PASS", t.name); }
-    catch (e) { failed++; console.log("FAIL", t.name, "\n  " + e.message); }
+  try {
+    for (const t of tests) {
+      try { await t.fn(); console.log("PASS", t.name); }
+      catch (e) { failed++; console.log("FAIL", t.name, "\n  " + e.message); }
+    }
+  } finally {
+    // Safety net: any fixture dir a failing/skipped clean() left behind is removed here.
+    for (const dir of liveTmpDirs) clean(dir);
   }
   console.log(failed ? `${failed} test(s) failed` : "all green");
   return failed ? 1 : 0;

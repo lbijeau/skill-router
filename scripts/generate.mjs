@@ -293,6 +293,16 @@ function expandTilde(p) {
 
 export function mergeSettings(settingsPath, repoRoot) {
   const home = os.homedir();
+  const tmpRoot = realPath(os.tmpdir());
+  const isTempPath = (p) => {
+    try { return realPath(p).startsWith(tmpRoot + path.sep); }
+    catch { return path.resolve(p).startsWith(tmpRoot + path.sep); }
+  };
+  // A settings file inside the temp dir is itself a test fixture; only persistent
+  // user settings must never gain (or keep) temp-dir scan entries.
+  const settingsArePersistent = !isTempPath(settingsPath);
+  if (settingsArePersistent && isTempPath(path.join(repoRoot, "agents")))
+    return { changed: false, entry: null, error: "refusing to register an agents dir under the system temp dir" };
   const underHome = repoRoot === home || repoRoot.startsWith(home + path.sep);
   const entry = underHome
     ? "~/" + path.relative(home, repoRoot) + "/agents"
@@ -313,14 +323,19 @@ export function mergeSettings(settingsPath, repoRoot) {
     return { changed: true, entry };
   }
 
-  const list = Array.isArray(existing?.subagents?.agentScanDirs)
+  const rawList = Array.isArray(existing?.subagents?.agentScanDirs)
     ? existing.subagents.agentScanDirs : [];
+  // Drop stale entries that live under the system temp dir (e.g. leaked test fixtures).
+  const list = settingsArePersistent
+    ? rawList.filter(d => !isTempPath(expandTilde(d)))
+    : rawList;
   const already = list.some(d => realPath(expandTilde(d)) === realPath(resolved));
-  if (already) return { changed: false, entry };
+  if (already && list.length === rawList.length) return { changed: false, entry };
 
   atomicWrite(settingsPath + ".bak", fs.readFileSync(settingsPath, "utf8"));
+  const nextList = already ? list : [...list, entry];
   const next = { ...existing,
-    subagents: { ...existing?.subagents, agentScanDirs: [...list, entry] } };
+    subagents: { ...existing?.subagents, agentScanDirs: nextList } };
   atomicWrite(settingsPath, JSON.stringify(next, null, 2) + "\n");
   return { changed: true, entry };
 }
