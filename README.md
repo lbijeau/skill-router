@@ -73,6 +73,9 @@ Then:
   entry generates one.
 - Each repo is shallow-cloned into `skills/<name>/` (gitignored, never
   committed).
+- See the generation fan-out diagram in
+  [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#pipeline) for how one
+  manifest entry becomes three isolated agents (pi, Vibe, Claude Code).
 - One agent definition is generated into `agents/<name>.md` (committed)
   with `inheritSkills: false`, an explicit `skills:` list of everything
   discovered in the clone, and `skillPath: ../skills/<name>`. Unless the

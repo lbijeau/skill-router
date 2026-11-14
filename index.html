@@ -8,6 +8,11 @@
 <meta property="og:title" content="skill-router — one clean-room agent per skill repo">
 <meta property="og:description" content="skill-router pins 13 upstream skill repos and generates an isolated agent for each, for pi, Mistral Vibe and Claude Code, plus a catalog-driven router.">
 <meta property="og:url" content="https://lbijeau.github.io/skill-router/">
+<meta property="og:image" content="https://lbijeau.github.io/skill-router/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://lbijeau.github.io/skill-router/og-image.png">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='4' fill='%230F1B38'/%3E%3Crect x='5' y='7' width='22' height='4' rx='1' fill='%23FFB627'/%3E%3Crect x='5' y='14' width='16' height='4' rx='1' fill='%23FFB627'/%3E%3Crect x='5' y='21' width='19' height='4' rx='1' fill='%23A9B8DC'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -243,6 +248,24 @@ h2 {
 .steps code { font-family: var(--font-mono); font-size: 0.82em; color: var(--ink); }
 
 /* Targets --------------------------------------------------------------------- */
+.isolation-schematic {
+  display: block; width: 100%; height: auto; margin: 1rem 0 1.6rem;
+  max-width: 46rem; margin-inline: auto;
+}
+.isolation-schematic text { font-family: var(--font-mono); fill: var(--ink); }
+.isolation-schematic .dim-label { fill: var(--muted); }
+.isolation-schematic .wall-label { fill: var(--board); font-weight: 600; }
+.isolation-schematic .node-box { fill: var(--card); stroke: var(--line); stroke-width: 1.5; }
+.isolation-schematic .wall-box { fill: var(--board); }
+.isolation-schematic .flow-line { stroke: var(--muted); stroke-width: 1.5; fill: none; }
+.isolation-schematic .flow-line.blocked { stroke: var(--line); stroke-dasharray: 3 3; }
+.isolation-schematic .accent { fill: var(--amber); }
+.isolation-schematic .schematic-fade { animation: schematic-fade 0.6s ease both; }
+@keyframes schematic-fade { from { opacity: 0; } }
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
 .targets { display: grid; gap: 1.2rem; grid-template-columns: repeat(3, 1fr); }
 .target {
   background: var(--card); border: 1px solid var(--line); border-radius: 8px;
@@ -528,6 +551,43 @@ h2 {
         <h2 id="targets-h">Three targets, three kinds of clean room</h2>
         <p>Each target receives its own generated artifacts; skills are read as files inside the spawned agent, never loaded into your own session. How complete that isolation is differs per tool.</p>
       </div>
+      <svg class="isolation-schematic schematic-fade" viewBox="0 0 820 210" width="100%" role="img"
+        aria-label="Diagram: the parent session spawns an agent across a wall; the spawned agent reads skill files on disk through a one-way, read-only channel; the parent session has no direct path to those files.">
+        <defs>
+          <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"></path>
+          </marker>
+        </defs>
+        <g aria-hidden="true">
+          <rect class="node-box" x="16" y="30" width="168" height="64" rx="4"></rect>
+          <text x="100" y="58" text-anchor="middle" font-size="13" font-weight="600">Parent session</text>
+          <text class="dim-label" x="100" y="76" text-anchor="middle" font-size="10">your context</text>
+
+          <rect class="wall-box" x="204" y="10" width="10" height="120" rx="2"></rect>
+          <text class="wall-label" x="209" y="148" text-anchor="middle" font-size="10" letter-spacing="0.08em">WALL</text>
+
+          <rect class="node-box" x="234" y="30" width="168" height="64" rx="4"></rect>
+          <text x="318" y="58" text-anchor="middle" font-size="13" font-weight="600">Spawned agent</text>
+          <text class="dim-label" x="318" y="76" text-anchor="middle" font-size="10">walled, per target</text>
+
+          <rect class="node-box" x="560" y="30" width="208" height="64" rx="4"></rect>
+          <text x="664" y="54" text-anchor="middle" font-size="13" font-weight="600">Skill files</text>
+          <text class="dim-label" x="664" y="72" text-anchor="middle" font-size="10">on disk</text>
+
+          <line class="flow-line" x1="184" y1="62" x2="200" y2="62"></line>
+          <line class="flow-line" x1="218" y1="62" x2="230" y2="62" marker-end="url(#arrow)"></line>
+          <text class="dim-label" x="209" y="20" text-anchor="middle" font-size="10">spawns</text>
+
+          <line class="flow-line" x1="402" y1="62" x2="556" y2="62" marker-end="url(#arrow)"></line>
+          <rect class="accent" x="440" y="9" width="78" height="15" rx="3"></rect><text x="479" y="20" text-anchor="middle" font-size="10" font-weight="600" letter-spacing="0.04em" fill="var(--board)">READ-ONLY</text>
+
+          <path class="flow-line blocked" d="M100,94 C100,170 664,170 664,94"></path>
+          <circle cx="209" cy="165" r="7" fill="var(--concourse)" stroke="var(--muted)" stroke-width="1.5"></circle>
+          <path d="M205,161 L213,169 M213,161 L205,169" stroke="var(--muted)" stroke-width="1.5"></path>
+          <text class="dim-label" x="382" y="190" text-anchor="middle" font-size="10">no direct access</text>
+        </g>
+      </svg>
+      <p class="dim-label" style="color: var(--muted); font-size: 0.85rem; margin: -1rem 0 1.5rem; max-width: 42rem;">Same shape on every target: the parent never reads skill files itself — only a walled, spawned agent does, and only one way.</p>
       <div class="targets">
         <article class="target">
           <h3>pi</h3>

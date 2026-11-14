@@ -6,6 +6,24 @@ router. Everything is derived from one manifest; nothing is configured twice.
 
 ## Pipeline
 
+The six stages, with the three-way branch at generate and wire
+reconverging at the catalog/router:
+
+```mermaid
+flowchart TD
+    A["Manifest<br/>repos.json"] --> B["Clone<br/>skills/&lt;name&gt;/"]
+    B --> C["Discover<br/>scripts/discover.mjs"]
+    C --> D1["Generate: pi<br/>agents/&lt;name&gt;.md"]
+    C --> D2["Generate: Vibe<br/>agents-vibe/&lt;name&gt;.toml"]
+    C --> D3["Generate: Claude Code<br/>agents-claude/&lt;name&gt;.md"]
+    D1 --> E1["Wire: pi settings"]
+    D2 --> E2["Wire: Vibe config"]
+    D3 --> E3["Wire: Claude agents dir + permissions"]
+    E1 --> F["Catalog + router"]
+    E2 --> F
+    E3 --> F
+```
+
 1. **Manifest** — `repos.json`: one entry per repo with `name`, `url`,
    `description`, `persona`, and optional `skillSource` / `pathExclude`
    curation. Validated by `loadManifest` (names, required fields, URL shape).
@@ -33,6 +51,17 @@ router. Everything is derived from one manifest; nothing is configured twice.
      `omitClaudeMd: true`, persona + skill table, ownership marker.
    All three directories are committed (ADR-002). A repo with zero skills
    gets no agent; reserved or blank-description names get no Claude agent.
+
+   One manifest entry fans out into the three generated artifacts, each
+   with its own isolation mechanism:
+
+   ```mermaid
+   flowchart LR
+       M["repos.json entry"] --> P["pi: agents/&lt;name&gt;.md<br/>inheritSkills: false<br/>+ read-only tools allowlist"]
+       M --> V["Vibe: agents-vibe/&lt;name&gt;.toml<br/>disabled_tools: [skill]<br/>+ enabled_tools allowlist"]
+       M --> CC["Claude Code: agents-claude/&lt;name&gt;.md<br/>tools: Read, Grep, Glob"]
+   ```
+
 5. **Wire settings** — idempotent, never destructive (ADR-004):
    - **pi**: `~/.pi/agent/settings.json` gains
      `subagents.agentScanDirs: ["…/skill-router/agents"]`, making the agents
