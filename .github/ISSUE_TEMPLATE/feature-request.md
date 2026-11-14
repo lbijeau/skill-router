@@ -1,0 +1,40 @@
+---
+name: Feature request
+description: Propose a change to how skill-router works
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Decisions in this repo are recorded as ADRs — see
+        [docs/decisions](../../tree/master/docs/decisions). If your idea
+        contradicts one, say so and make the case; superseding is a
+        normal outcome, not a problem.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What can't you do today?
+      description: The situation you were in, not the solution. One or two sentences.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What should change?
+      description: Your idea, if you have one — but the problem matters more.
+    validations:
+      required: false
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which area?
+      options:
+        - manifest / pinning
+        - generated agents (pi / Vibe / Claude)
+        - tool policy / security
+        - install / update / status
+        - catalog / router
+        - landing page / docs
+        - other
+    validations:
+      required: true

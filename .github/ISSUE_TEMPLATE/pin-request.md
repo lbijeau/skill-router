@@ -1,0 +1,55 @@
+---
+name: Pin request
+description: Propose a third-party skills repo for the manifest
+labels: ["pin-request"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before opening: the repo must ship skills (directories with a
+        `SKILL.md`) and carry a permissive license. Unlicensed repos are
+        fine to clone for personal use but will not be pinned — see
+        [ATTRIBUTIONS.md](../../blob/master/ATTRIBUTIONS.md).
+  - type: input
+    id: repo
+    attributes:
+      label: Repository URL
+      placeholder: https://github.com/owner/repo
+    validations:
+      required: true
+  - type: dropdown
+    id: license
+    attributes:
+      label: License
+      options:
+        - MIT
+        - Apache-2.0
+        - Other permissive (I'll note it below)
+        - None / not sure
+    validations:
+      required: true
+  - type: textarea
+    id: skills
+    attributes:
+      label: What skills does it ship?
+      description: One line per skill — name and what it does. If it ships none yet, say so; entries with zero skills are kept as SCHEDULED.
+      placeholder: |
+        skill-name: one line on what it does
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why pin it?
+      description: What does this repo's author bring that the current catalog doesn't? One or two sentences.
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checked
+      options:
+        - label: I checked the catalog — this repo (or an equivalent) is not already pinned.
+          required: true
+        - label: The skill descriptions and persona text will be shown verbatim to generated agents, and I am comfortable vouching for this repo's content.
+          required: true

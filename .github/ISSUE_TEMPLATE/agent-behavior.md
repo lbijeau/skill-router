@@ -1,0 +1,53 @@
+---
+name: Agent behavior
+description: A generated agent did something unexpected
+labels: ["agent"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Generated agents behave per the manifest's per-repo `tools`
+        policy — read-only by default, `"full"` for repos whose skills
+        edit files or run commands. Check the repo's entry in
+        [repos.json](../../blob/master/repos.json) first; "it can't
+        write files" is the policy working, not a bug.
+  - type: input
+    id: agent
+    attributes:
+      label: Which agent?
+      placeholder: humanizer
+    validations:
+      required: true
+  - type: dropdown
+    id: target
+    attributes:
+      label: Which target?
+      options:
+        - pi
+        - Mistral Vibe
+        - Claude Code
+        - more than one
+    validations:
+      required: true
+  - type: dropdown
+    id: policy
+    attributes:
+      label: What is that repo's tools policy in repos.json?
+      options:
+        - 'read-only (or not set)'
+        - '"full"'
+        - not sure
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What did it do, and what did you expect?
+      description: Include the task you gave it and the relevant output.
+    validations:
+      required: true
+  - type: textarea
+    id: skill
+    attributes:
+      label: Which skill was it applying (if any)?
+      description: The skill name from the catalog, if a skill was in play.
