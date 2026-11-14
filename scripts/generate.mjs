@@ -815,6 +815,13 @@ function runFlow(root, mode, { settingsPath, vibeConfigPath, skillsHome, claudeH
   for (const name of genResult.removed) {
     report.push(`${name}: 0 skills, removed stale agent`);
   }
+  // Overlay entries generate agent files into the committed agents/ dirs so pi
+  // can discover them; those files are machine-local, so warn loudly — nothing
+  // guards them against an accidental `git add -A` except this line and README.
+  for (const entry of manifest.repos) {
+    if (entry.local && !failed.has(entry.name))
+      report.push(`${entry.name}: local overlay entry — generated agent files are machine-local, do not commit them`);
+  }
   const vibeResult = writeVibeAgentFiles(root, manifest, failed);
   for (const name of vibeResult.removed) {
     report.push(`${name}: 0 skills, removed stale vibe agent`);

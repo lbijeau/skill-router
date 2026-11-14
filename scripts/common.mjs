@@ -78,8 +78,14 @@ export function atomicWrite(file, content, mode) {
   } finally {
     fs.closeSync(fd);
   }
-  if (mode !== undefined) fs.chmodSync(tmpf, mode);
-  fs.renameSync(tmpf, file);
+  try {
+    if (mode !== undefined) fs.chmodSync(tmpf, mode);
+    fs.renameSync(tmpf, file);
+  } catch (e) {
+    // Don't litter the tmp file when the chmod/rename leg fails.
+    fs.rmSync(tmpf, { force: true });
+    throw e;
+  }
 }
 
 export function realPath(p) {

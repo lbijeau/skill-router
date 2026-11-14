@@ -18,11 +18,15 @@ router. Everything is derived from one manifest; nothing is configured twice.
    applies `skillSource`/`pathExclude`, and dedupes skills by name (first
    wins, the rest are reported).
 4. **Generate** — one agent per repo, restricted to that repo's skills
-   (ADR-001):
+   (ADR-001); tools follow the per-repo policy (ADR-006): `tools: "full"`
+   keeps the runtime's default tool set, anything else gets a read-only
+   allowlist —
    - **pi**: `agents/<name>.md` — frontmatter `inheritSkills: false`, an
-     explicit `skills:` list, `skillPath: ../skills/<name>`.
+     explicit `skills:` list, `skillPath: ../skills/<name>`, and
+     `tools: read, grep, find, ls` unless the entry is marked full.
    - **Vibe**: `agents-vibe/<name>.toml` — `agent_type = "subagent"`,
-     `disabled_tools = ["skill"]`, instructions with a skill table of
+     `disabled_tools = ["skill"]`, `enabled_tools = ["read_file", "grep"]`
+     unless full, instructions with a skill table of
      `~`-anchored `SKILL.md` paths (Vibe expanduser()s paths at runtime, so
      no machine-specific usernames are committed).
    - **Claude Code**: `agents-claude/<name>.md` — `tools: Read, Grep, Glob`,

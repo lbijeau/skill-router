@@ -52,6 +52,10 @@ Then:
   out of the committed `catalog/skill-catalog.md`, so they are not routable
   through the catalog-driven router; invoke their agent by name instead. A
   local entry whose `name` collides with a committed one is a load error.
+  Their generated agent files do land in `agents/`, `agents-vibe/` and
+  `agents-claude/` (pi discovers them there) — those files are machine-local:
+  never commit them, and `install`/`update` print a reminder whenever a local
+  entry generates one.
 - Each repo is shallow-cloned into `skills/<name>/` (gitignored, never
   committed).
 - One agent definition is generated into `agents/<name>.md` (committed)
