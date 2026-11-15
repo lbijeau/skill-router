@@ -3252,6 +3252,117 @@ test("landing page: masthead, lede and hero stats match repos.json, catalog and 
   eq(html.includes("<b>3</b>targets wired"), true);
 });
 
+
+import * as wf from "./workflows.mjs";
+
+function wfRoot(repos) {
+  const root = tmp();
+  w(root, "repos.json", JSON.stringify({ repos }));
+  return root;
+}
+
+test("loadWorkflows returns [] when workflows.json is absent", () => {
+  const root = tmp();
+  w(root, "repos.json", JSON.stringify({ repos: [
+    { name: "a", url: "https://x/a", description: "d", persona: "p" } ] }));
+  const { workflows } = wf.loadWorkflows(root);
+  eq(workflows.length, 0);
+  clean(root);
+});
+
+test("loadWorkflows returns a valid workflow with steps", () => {
+  const root = tmp();
+  w(root, "repos.json", JSON.stringify({ repos: [
+    { name: "a", url: "https://x/a", description: "d", persona: "p" },
+    { name: "b", url: "https://x/b", description: "d", persona: "p" } ] }));
+  w(root, "workflows.json", JSON.stringify({ workflows: [
+    { name: "review", description: "Two-pass review",
+      steps: [
+        { agent: "a", task: "Review the code", output: "docs/review-a.md" },
+        { agent: "b", task: "Audit the review", output: "docs/review-b.md" } ] } ] }));
+  const { workflows } = wf.loadWorkflows(root);
+  eq(workflows.length, 1);
+  eq(workflows[0].name, "review");
+  eq(workflows[0].steps[1].agent, "b");
+  clean(root);
+});
+
+test("loadWorkflows rejects unknown agent names", () => {
+  const root = wfRoot([
+    { name: "a", url: "https://x/a", description: "d", persona: "p" } ]);
+  w(root, "workflows.json", JSON.stringify({ workflows: [
+    { name: "review", description: "Two-pass review",
+      steps: [ { agent: "zzz", task: "Review the code", output: "docs/review-a.md" } ] } ] }));
+  assert.throws(() => wf.loadWorkflows(root), /review/);
+  assert.throws(() => wf.loadWorkflows(root), /zzz/);
+  clean(root);
+});
+
+test("loadWorkflows rejects empty steps, missing fields, bad names", () => {
+  const repos = [ { name: "a", url: "https://x/a", description: "d", persona: "p" } ];
+  {
+    const root = wfRoot(repos);
+    w(root, "workflows.json", JSON.stringify({ workflows: [
+      { name: "review", description: "Two-pass review", steps: [] } ] }));
+    assert.throws(() => wf.loadWorkflows(root), /review/);
+    clean(root);
+  }
+  {
+    const root = wfRoot(repos);
+    w(root, "workflows.json", JSON.stringify({ workflows: [
+      { name: "review", description: "Two-pass review",
+        steps: [ { agent: "a", task: "Review the code" } ] } ] }));
+    assert.throws(() => wf.loadWorkflows(root), /review/);
+    clean(root);
+  }
+  {
+    const root = wfRoot(repos);
+    w(root, "workflows.json", JSON.stringify({ workflows: [
+      { name: "Bad_Name", description: "Two-pass review",
+        steps: [ { agent: "a", task: "Review the code", output: "docs/out.md" } ] } ] }));
+    assert.throws(() => wf.loadWorkflows(root), /Bad_Name/);
+    clean(root);
+  }
+});
+
+test("loadWorkflows rejects duplicate workflow names", () => {
+  const root = wfRoot([
+    { name: "a", url: "https://x/a", description: "d", persona: "p" } ]);
+  const entry = {
+    name: "review", description: "Two-pass review",
+    steps: [ { agent: "a", task: "Review the code", output: "docs/out.md" } ] };
+  w(root, "workflows.json", JSON.stringify({ workflows: [entry, entry] }));
+  assert.throws(() => wf.loadWorkflows(root), /review/);
+  assert.throws(() => wf.loadWorkflows(root), /duplicate/);
+  clean(root);
+});
+
+test("loadWorkflows rejects escaping output paths", () => {
+  const repos = [ { name: "a", url: "https://x/a", description: "d", persona: "p" } ];
+  for (const output of ["../outside.md", "/abs.md", "..\\outside.md"]) {
+    const root = wfRoot(repos);
+    w(root, "workflows.json", JSON.stringify({ workflows: [
+      { name: "review", description: "Two-pass review",
+        steps: [ { agent: "a", task: "Review the code", output } ] } ] }));
+    assert.throws(() => wf.loadWorkflows(root), /review/, `output: ${output}`);
+    clean(root);
+  }
+});
+
+test("loadWorkflows rejects duplicate output paths within a workflow", () => {
+  const root = wfRoot([
+    { name: "a", url: "https://x/a", description: "d", persona: "p" },
+    { name: "b", url: "https://x/b", description: "d", persona: "p" } ]);
+  w(root, "workflows.json", JSON.stringify({ workflows: [
+    { name: "review", description: "Two-pass review",
+      steps: [
+        { agent: "a", task: "Review the code", output: "docs/out.md" },
+        { agent: "b", task: "Audit the review", output: "docs/out.md" } ] } ] }));
+  assert.throws(() => wf.loadWorkflows(root), /review/);
+  assert.throws(() => wf.loadWorkflows(root), /docs\/out\.md/);
+  clean(root);
+});
+
 process.exitCode = await (async () => {
   let failed = 0;
   try {
