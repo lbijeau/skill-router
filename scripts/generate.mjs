@@ -236,7 +236,7 @@ export function renderVibeOrchestratorTOML(workflows) {
     "You are the workflow orchestrator. Your single job is to run multi-agent workflows step by step: dispatch each step to its named agent, verify the output exists, and checkpoint between steps. You never do the step work yourself.",
     "",
     "Run contract:",
-    "1. Spawn the step's agent with the step's task text using the spawn tool.",
+    "1. Spawn the step's agent with the step's task text using the `task` tool (spawn).",
     "2. Wait for the reply; do not proceed until it returns.",
     "3. Write the step's output file from the reply using write_file.",
     "4. Verify the output file is non-empty before moving on.",
