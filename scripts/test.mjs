@@ -418,6 +418,19 @@ test("writeVibeOrchestrator never removes a user-authored file", () => {
   clean(root);
 });
 
+test("writeVibeOrchestrator never clobbers a user-authored file on the write path", () => {
+  const root = tmp();
+  w(root, "repos.json", JSON.stringify({ repos: [] }));
+  w(root, "workflows.json", JSON.stringify({ workflows: [
+    { name: "w", description: "d", steps: [ { agent: "a", task: "t", output: "docs/o.md" } ] } ] }));
+  w(root, "agents-vibe/workflow-orchestrator.toml", "hand-written, no marker\n");
+  const r = gen.writeVibeOrchestrator(root, wf.manifestState(root)); // valid manifest
+  eq(r.written, false);
+  eq(r.skippedUserFile, true);
+  eq(fs.readFileSync(path.join(root, "agents-vibe", "workflow-orchestrator.toml"), "utf8"), "hand-written, no marker\n");
+  clean(root);
+});
+
 test("writeVibeAgentFiles: writes, idempotent, removes zero-skill leftovers", () => {
   const root = tmp();
   w(root, "repos.json", JSON.stringify({ repos: [

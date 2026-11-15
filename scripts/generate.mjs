@@ -259,7 +259,13 @@ export const VIBE_ORCHESTRATOR_NAME = "workflow-orchestrator";
 // A file without the generated marker is user-authored and is never touched.
 export function writeVibeOrchestrator(root, wfState) {
   const file = path.join(root, "agents-vibe", `${VIBE_ORCHESTRATOR_NAME}.toml`);
+  const userAuthored = () => fs.existsSync(file)
+    && !fs.readFileSync(file, "utf8").split("\n", 5).join("\n").includes(GENERATED_MARKER);
   if (wfState?.valid && wfState.workflows.length > 0) {
+    // The marker guard protects the prune path; it must protect the write
+    // path too — a user-authored file at the generated path is never
+    // clobbered, only reported.
+    if (userAuthored()) return { written: false, removed: false, skippedUserFile: true };
     fs.mkdirSync(path.dirname(file), { recursive: true });
     atomicWrite(file, renderVibeOrchestratorTOML(wfState.workflows));
     return { written: true, removed: false };
@@ -270,6 +276,7 @@ export function writeVibeOrchestrator(root, wfState) {
       fs.rmSync(file);
       return { written: false, removed: true };
     }
+    return { written: false, removed: false, skippedUserFile: true };
   }
   return { written: false, removed: false };
 }
@@ -1057,7 +1064,7 @@ function runFlow(root, mode, { settingsPath, vibeConfigPath, skillsHome, claudeH
   writeVibeRouterAgent(root, anchor);
   report.push(`vibe router agent: ${ROUTER_AGENT_NAME} written to agents-vibe/${ROUTER_AGENT_NAME}.toml`);
   const orchResult = writeVibeOrchestrator(root, wfState);
-  report.push(`vibe orchestrator mode: ${orchResult.written ? "written" : orchResult.removed ? "removed" : "skipped"}`);
+  report.push(`vibe orchestrator mode: ${orchResult.written ? "written" : orchResult.removed ? "removed" : orchResult.skippedUserFile ? "skipped (user-authored file present, left alone)" : "skipped"}`);
   writeClaudeRouterAgent(root, anchor);
   report.push(`claude router agent: ${ROUTER_AGENT_NAME} written to agents-claude/${ROUTER_AGENT_NAME}.md`);
   const synced = syncGlobalSkills(root, skillsHome, wfState);
