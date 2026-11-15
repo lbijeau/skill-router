@@ -359,9 +359,6 @@ test("renderVibeAgentTOML: rows outside home stay absolute", () => {
 });
 
 
-
-
-
 test("writeVibeAgentFiles: writes, idempotent, removes zero-skill leftovers", () => {
   const root = tmp();
   w(root, "repos.json", JSON.stringify({ repos: [
@@ -527,8 +524,6 @@ test("status: exit rules incl. expected absence for zero-skill entries", () => {
   eq(r.exitCode, 0);
   clean(root);
 });
-
-
 
 
 test("status: zero-skill leftover TOML is stale and fails exit", () => {
@@ -1556,12 +1551,6 @@ test("syncGlobalSkills: copies byte-identical, idempotent, skips non-skills", ()
 });
 
 
-
-
-
-
-
-
 test("renderRouterAgent: frontmatter shape and persona body", () => {
   const home = "/fake/home";
   const out = gen.renderRouterAgent({ root: "/fake/home/sr", home });
@@ -2436,9 +2425,6 @@ test("syncClaudeSkills: writes route-skill; refuses unmarked file and symlinked 
   eq(fs.lstatSync(path.join(home, "route-skill/SKILL.md")).isSymbolicLink(), true);
   clean(root); clean(path.dirname(home));
 });
-
-
-
 
 
 test("install: route-skill for claude lands in the claude skills dir and never in the pi skills home", () => {

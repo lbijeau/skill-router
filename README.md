@@ -148,8 +148,8 @@ While skill-workflows is installed, its installer writes the Vibe
 `workflow-orchestrator.toml` into this repo's `agents-vibe/` with its own
 marker: skill-router's prune never touches a foreign-marked file, and
 removing the skill-workflows checkout orphans that TOML — delete it
-manually. The first
-pruning them once (only the copies carrying skill-router's marker;
+manually. The first post-extraction `install`/`update` of skill-router
+prunes the old copies (only the ones carrying skill-router's marker;
 skill-workflows-owned installs are never touched).
 
 ## Trust model
@@ -220,12 +220,14 @@ other generated Vibe subagent), but no `route-skill` invocation skill — Vibe
 has no skill-loading tool for the host model to call. Vibe discovers
 `skill-router` the same way it discovers every per-repo subagent: by its
 `description`, through the `agent_paths` entry already wired into
-`~/.vibe/config.toml`. The mechanics are confirmed (a non-blank `description`
-is all a Vibe subagent type needs to be visible, and nothing beyond
-`agent_paths` is required); whether Vibe's model actually reaches for the
-router unprompted has not been checked with a live probe the way
-[Claude Code isolation](#claude-code-isolation) was — treat it as plausible,
-not guaranteed, and re-check after Vibe upgrades.
+`~/.vibe/config.toml`. The mechanics are probe-verified (a live headless
+Vibe session discovered and spawned a generated subagent from its
+description — recorded in
+[ADR-012](docs/decisions/ADR-012-vibe-router-and-harness-facts.md), which
+cites the ADR-010 probe); whether the model reaches for the router
+specifically, unprompted, has not been tested the way
+[Claude Code isolation](#claude-code-isolation) was — treat that as
+plausible, not guaranteed, and re-check after Vibe upgrades.
 
 ## Claude Code isolation
 

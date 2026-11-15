@@ -46,9 +46,12 @@ to read a policy from.
 
 ### No Vibe router (keep description-based routing)
 Rejected as the default, retained as the honest caveat: the mechanics
-are confirmed, but whether Vibe's model reaches for the router unprompted
-has not been probe-verified the way Claude Code isolation was. The
-README and landing page carry that caveat; re-check after Vibe upgrades.
+are probe-verified (ADR-010's live probe discovered and spawned a
+generated subagent from its description — the same discovery surface
+the router depends on), but whether Vibe's model reaches for the
+router specifically, unprompted, has not been tested the way Claude
+Code isolation was. The README and landing page carry that caveat;
+re-check after Vibe upgrades.
 
 ## Consequences
 - The catalog router is tri-target; the catalog's bulk stays out of the

@@ -546,7 +546,7 @@ h2 {
         <li>
           <span class="stop-tag">Stop 06</span>
           <h3>Catalog + router</h3>
-          <p><code>catalog/skill-catalog.md</code> is rebuilt every run. A generated <code>skill-router</code> agent on every target reads it, opens the winning <code>SKILL.md</code>, and returns only the recommendation — the catalog's bulk never enters your session. pi and Claude Code reach it through the <code>route-skill</code> invocation skill; Vibe has no such skill, so it routes to <code>skill-router</code> on the agent's description instead, the same way it picks any other subagent. That discoverability is plausible from the mechanics but not yet probe-verified the way Claude Code isolation was — re-check after Vibe upgrades.</p>
+          <p><code>catalog/skill-catalog.md</code> is rebuilt every run. A generated <code>skill-router</code> agent on every target reads it, opens the winning <code>SKILL.md</code>, and returns only the recommendation — the catalog's bulk never enters your session. pi and Claude Code reach it through the <code>route-skill</code> invocation skill; Vibe has no such skill, so it routes to <code>skill-router</code> on the agent's description instead, the same way it picks any other subagent. The mechanics are probe-verified — a live Vibe session spawned a generated subagent from its description (ADR-012, citing the ADR-010 probe) — though whether the model reaches for the router specifically, unprompted, is still plausible rather than guaranteed; re-check after Vibe upgrades.</p>
         </li>
       </ol>
     </div>
