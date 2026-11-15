@@ -28,9 +28,15 @@ verdict, artifacts in the session's workflow outputs) established:
   analysis, not live re-test: `write_file` is denied by the headless
   approval callback (interactive sessions prompt instead), and
   `ask_user_question` exists as the UI-layer `ui.ask_user_question`,
-  absent in `-p` mode by design. Interactive-mode checkpointing and the
-  write-relay loop therefore remain inference until an interactive smoke
-  test exercises them on first real use.
+  absent in `-p` mode by design. An interactive smoke test (2026-11-14,
+  mistral-vibe 3.0.3, `design-review` run end-to-end in a live session)
+  then **verified all three inferences live**: the write-relay loop worked
+  (the orchestrator wrote `docs/design.md` from the spawned agent's reply,
+  26 KB, verified non-empty), `ask_user_question` produced a real
+  Continue/Stop checkpoint between steps, the resume rule skipped both
+  steps on re-run (no agents spawned, no files touched), and a bogus
+  agent name failed with `subagent_type_not_found` — stopped and reported,
+  no substitute guessed.
 - Probe correction: the `AgentType` enum values are `agent` and
   `subagent` (`vibe/agents.py`); a mode is `agent_type = "agent"`, not
   `"mode"`.
@@ -87,9 +93,9 @@ than papered over.
   validator only guarantees names are in `repos.json` at generation time.
   Accepted: the mode's instructions say stop-and-report on spawn failure.
 - Modes and subagents share the `agents-vibe/` directory via `agent_paths`;
-  whether a mode can appear in a spawned agent's subagent menu is
-  unverified (likely benign — one line to check on first interactive
-  smoke test).
+  the smoke test verified the mode does **not** appear in its own spawn
+  list ("that's me, and I don't appear as a spawnable config") — benign,
+  as predicted.
 - Vibe users select the mode explicitly (`--agent workflow-orchestrator`)
   — the same explicit-invocation UX as the skills, not a loss.
 - Writes by the orchestrator prompt for approval in interactive
