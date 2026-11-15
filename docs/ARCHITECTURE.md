@@ -140,3 +140,5 @@ node scripts/test.mjs   # offline, fixture-based; no network needed
   over `--dry-run`
 - [ADR-008](decisions/ADR-008-anchor-flag-for-committed-generation.md)
   — `--anchor` flag for committed-file generation
+- [ADR-009](decisions/ADR-009-vibe-router-and-harness-facts.md) — Vibe
+  router agent and the source-verified Vibe harness facts
