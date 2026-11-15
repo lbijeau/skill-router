@@ -3,7 +3,6 @@ import path from "node:path";
 import os from "node:os";
 import { NAME_RE, REPO_ROOT, ROUTER_AGENT_NAME, ROUTER_DESCRIPTION, STATE, atomicWrite, normalizeText, realPath, routerBodyLines, skillRows, yamlQuote } from "./common.mjs";
 import { discoverSkills } from "./discover.mjs";
-import { manifestState } from "./workflows.mjs";
 
 // The legacy (pre-path) marker. A file ending in exactly this line predates
 // per-checkout scoping and is treated as this checkout's, per the migration
@@ -412,7 +411,10 @@ export const GLOBAL_SKILL_HEADER = "<!-- Generated-style boilerplate; " + GLOBAL
 
 // Owned only if the boilerplate comment is the first thing after the
 // frontmatter; a user's file that merely mentions the phrase is not.
-function isOwnedSkillContent(content) {
+// Also the ownership predicate for the ADR-011 orphan prune of the
+// de-extracted run-workflow skills (pi and Claude installs carry the same
+// header shape).
+export function isOwnedSkillContent(content) {
   const lines = content.split("\n");
   if (lines[0] !== "---") return false;
   const end = lines.indexOf("---", 1);
@@ -447,7 +449,7 @@ function skillDestStatus(skillsHome, src) {
   return cur === src.content ? "current" : "outdated";
 }
 
-export function syncClaudeSkills(root, skillsHome, wfState) {
+export function syncClaudeSkills(root, skillsHome) {
   const written = [], refused = [];
   const existed = fs.existsSync(skillsHome);
   const sources = claudeSkillSources(root);
@@ -459,26 +461,6 @@ export function syncClaudeSkills(root, skillsHome, wfState) {
     fs.mkdirSync(dir, { recursive: true });
     atomicWrite(path.join(dir, "SKILL.md"), src.content);
     written.push(src.name);
-  }
-  // The run-workflow skill reads the manifest that sits next to its own
-  // SKILL.md: copy the repo-root workflows.json into the installed dir —
-  // but only when the run-workflow skill itself is ours (not refused).
-  // Absent manifest = nothing to copy; install must not break. A malformed
-  // manifest is also skipped (runFlow already prints that warning) — and a
-  // previously installed copy is pruned, so the skill never executes a
-  // manifest the repo no longer endorses.
-  const state = wfState ?? manifestState(root);
-  const manifest = path.join(root, "workflows.json");
-  const runWorkflow = sources.find(s => s.name === "run-workflow");
-  if (runWorkflow && !refused.includes("run-workflow")) {
-    const dir = path.join(skillsHome, "run-workflow");
-    const destManifest = path.join(dir, "workflows.json");
-    if (state.valid && fs.existsSync(manifest)) {
-      fs.mkdirSync(dir, { recursive: true });
-      atomicWrite(destManifest, fs.readFileSync(manifest, "utf8"));
-    } else if (fs.existsSync(destManifest) && !isSymlink(dir) && !isSymlink(destManifest)) {
-      fs.rmSync(destManifest);
-    }
   }
   return { written, refused, dirCreated: !existed && fs.existsSync(skillsHome) };
 }
@@ -493,20 +475,6 @@ export function claudeSkillsStatus(root, skillsHome) {
     const st = skillDestStatus(skillsHome, src);
     if (st === "absent" || st === "outdated") stale = true;
     if (st === "refused") refused.push(src.name);
-  }
-  // The installed manifest must match what install would write: byte-compare
-  // against the repo-root workflows.json when the run-workflow skill is ours.
-  // A stale or extra installed copy (repo manifest changed, removed, or went
-  // malformed) counts as stale; a refused skill's files are the user's own.
-  const runWorkflow = sources.find(s => s.name === "run-workflow");
-  if (runWorkflow && !refused.includes("run-workflow")) {
-    const manifest = path.join(root, "workflows.json");
-    const expected = manifestState(root).valid && fs.existsSync(manifest)
-      ? fs.readFileSync(manifest, "utf8")
-      : null;
-    let installed = null;
-    try { installed = fs.readFileSync(path.join(skillsHome, "run-workflow", "workflows.json"), "utf8"); } catch {}
-    if (expected !== installed) stale = true;
   }
   return { stale, refused };
 }

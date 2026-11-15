@@ -55,8 +55,10 @@ The workflow module moves to a new repository, **skill-workflows**:
   skill-router's `agents-vibe/` (the only `agent_paths` entry the
   user's Vibe config has), with its own marker. The contract, stated
   in both READMEs: skill-router's prune **skips foreign markers**
-  (tested); skill-workflows owns removing its TOML on update and
-  uninstall; a missing skill-router checkout is a clear
+  (tested); skill-workflows' update rewrites its TOML; there is no
+  uninstall command in v1 — removing the skill-workflows checkout
+  orphans the TOML in skill-router's tree, and manual deletion is the
+  documented remedy; a missing skill-router checkout is a clear
   skip-with-message, never a silent failure or hard error. The known
   cost, accepted: skill-router's working tree shows the foreign file
   while skill-workflows is installed.

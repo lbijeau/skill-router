@@ -5,8 +5,7 @@ import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { NAME_RE, REPO_ROOT, ROUTER_AGENT_NAME, ROUTER_DESCRIPTION, STATE, atomicWrite, normalizeText, realPath, routerBodyLines, skillRows, tildePath, yamlQuote } from "./common.mjs";
 import { discoverSkills } from "./discover.mjs";
-import { claudeInstallStatus, claudeSkipReason, isOwnedClaudeAgent, pruneClaudeAgents, renderClaudeAgentFile, renderClaudeRouterAgent, resolveClaudeHome, runClaudeInstall, writeClaudeAgentFiles, writeClaudeRouterAgent } from "./claude.mjs";
-import { loadWorkflows, manifestState } from "./workflows.mjs";
+import { claudeInstallStatus, claudeSkipReason, isOwnedClaudeAgent, isOwnedSkillContent, isSymlink, pruneClaudeAgents, renderClaudeAgentFile, renderClaudeRouterAgent, resolveClaudeHome, runClaudeInstall, writeClaudeAgentFiles, writeClaudeRouterAgent } from "./claude.mjs";
 
 export * from "./common.mjs";
 export * from "./discover.mjs";
@@ -205,81 +204,11 @@ export function renderVibeAgentTOML(entry, skills, { home } = {}) {
   ].join("\n");
 }
 
-// The orchestrator runs as a root agent_type (not "mode" — the AgentType
-// enum in vibe only has agent/subagent; probed live at mistral-vibe 3.0.3).
-export const ORCHESTRATOR_ENABLED_TOOLS = ["read_file", "write_file", "task", "ask_user_question"];
-// enabled_tools allowlist defaults to ["explore"] with ASK permission and was
-// observed not to bind the root agent at mistral-vibe 3.0.3 — hence the explicit list.
-export const GENERATED_MARKER = "# skill-router: generated — safe to prune";
-
-export function renderVibeOrchestratorTOML(workflows) {
-  const description = tomlEscape(normalizeText("Run multi-agent workflows: dispatch each step, verify outputs, checkpoint between steps"));
-  const workflowBlocks = (workflows ?? []).map((wf) => {
-    const lines = [
-      `workflow: ${tomlEscape(normalizeText(wf.name))}`,
-      `description: ${tomlEscape(normalizeText(wf.description ?? ""))}`,
-    ];
-    wf.steps.forEach((step, i) => {
-      const task = tomlEscape(normalizeText(step.task));
-      lines.push(`step ${i + 1}: agent ${tomlEscape(normalizeText(step.agent))} — task: ${task} — output: ${tomlEscape(normalizeText(step.output))}`);
-    });
-    return lines.join("\n");
-  });
-  return [
-    GENERATED_MARKER,
-    'agent_type = "agent"',
-    `description = "${description}"`,
-    `enabled_tools = [${ORCHESTRATOR_ENABLED_TOOLS.map(t => `"${t}"`).join(", ")}]`,
-    '# allowlist defaults to ["explore"] (ASK permission) and does not bind the root at mistral-vibe 3.0.3 — pin it explicitly',
-    'disabled_tools = ["skill"]',
-    'instructions = """',
-    "You are the workflow orchestrator. Your single job is to run multi-agent workflows step by step: dispatch each step to its named agent, verify the output exists, and checkpoint between steps. You never do the step work yourself.",
-    "",
-    "Run contract:",
-    "1. Spawn the step's agent with the step's task text using the `task` tool (spawn).",
-    "2. Wait for the reply; do not proceed until it returns.",
-    "3. Write the step's output file from the reply using write_file.",
-    "4. Verify the output file is non-empty before moving on.",
-    "5. Before the next step, use ask_user_question as a checkpoint: report the step's result and confirm whether to continue.",
-    "6. If any step fails, stop and report the failure; never guess a substitute agent or do the work yourself.",
-    "",
-    "Resume rule: skip any step whose output file already exists and is non-empty.",
-    "",
-    "Workflows:",
-    ...workflowBlocks,
-    '"""',
-    "",
-  ].join("\n");
-}
-
-export const VIBE_ORCHESTRATOR_NAME = "workflow-orchestrator";
-
-// Writes the generated workflow-orchestrator mode when the manifest is valid
-// and non-empty; prunes the previously generated file when it goes stale.
-// A file without the generated marker is user-authored and is never touched.
-export function writeVibeOrchestrator(root, wfState) {
-  const file = path.join(root, "agents-vibe", `${VIBE_ORCHESTRATOR_NAME}.toml`);
-  const userAuthored = () => fs.existsSync(file)
-    && !fs.readFileSync(file, "utf8").split("\n", 5).join("\n").includes(GENERATED_MARKER);
-  if (wfState?.valid && wfState.workflows.length > 0) {
-    // The marker guard protects the prune path; it must protect the write
-    // path too — a user-authored file at the generated path is never
-    // clobbered, only reported.
-    if (userAuthored()) return { written: false, removed: false, skippedUserFile: true };
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    atomicWrite(file, renderVibeOrchestratorTOML(wfState.workflows));
-    return { written: true, removed: false };
-  }
-  if (fs.existsSync(file)) {
-    const head = fs.readFileSync(file, "utf8").split("\n", 5).join("\n");
-    if (head.includes(GENERATED_MARKER)) {
-      fs.rmSync(file);
-      return { written: false, removed: true };
-    }
-    return { written: false, removed: false, skippedUserFile: true };
-  }
-  return { written: false, removed: false };
-}
+// ADR-011: the workflow module (run-workflow skills, Vibe orchestrator mode)
+// moved to the skill-workflows repository, which writes its own
+// workflow-orchestrator.toml into this repo's agents-vibe/ with ITS marker.
+// The stale-prune below must never delete a foreign-owned generated file.
+export const FOREIGN_GENERATED_MARKER_RE = /^# (?!skill-router: )[^:\n]+: generated — safe to prune$/m;
 
 export function writeAgentFiles(root, manifest, skip = new Set()) {
   const agentsDir = path.join(root, "agents");
@@ -327,7 +256,7 @@ export function writeVibeAgentFiles(root, manifest, skip = new Set(), home) {
 // Global skills live committed under global-skills/<name>/SKILL.md and are
 // synced (overwritten) into the pi skills home on every install/update: they
 // are generated-style boilerplate, and user edits do not survive updates.
-export function syncGlobalSkills(root, skillsHome, wfState) {
+export function syncGlobalSkills(root, skillsHome) {
   const home = skillsHome ?? path.join(os.homedir(), ".pi/agent/skills");
   const srcDir = path.join(root, "global-skills");
   const written = [];
@@ -342,24 +271,38 @@ export function syncGlobalSkills(root, skillsHome, wfState) {
     fs.writeFileSync(dest, fs.readFileSync(src));
     written.push(dest);
   }
-  // The run-workflow skill reads the manifest that sits next to its own
-  // SKILL.md: copy the repo-root workflows.json into the installed dir.
-  // Absent manifest = nothing to copy; install must not break. A malformed
-  // manifest is also skipped (runFlow already prints that warning) — and a
-  // previously installed copy is pruned, so the skill never executes a
-  // manifest the repo no longer endorses.
-  const state = wfState ?? manifestState(root);
-  const manifest = path.join(root, "workflows.json");
-  if (fs.existsSync(path.join(srcDir, "run-workflow", "SKILL.md"))) {
-    const destManifest = path.join(home, "run-workflow", "workflows.json");
-    if (state.valid && fs.existsSync(manifest)) {
-      fs.mkdirSync(path.dirname(destManifest), { recursive: true });
-      atomicWrite(destManifest, fs.readFileSync(manifest, "utf8"));
-    } else if (fs.existsSync(destManifest)) {
-      fs.rmSync(destManifest);
+  return { written, skipped };
+}
+
+// ADR-011 de-extraction: skill-router no longer ships the run-workflow
+// skills — skill-workflows does. One last prune removes the installed copies
+// skill-router still owns (its generated-boilerplate header); installs owned
+// by skill-workflows (their header) and user-authored files are never touched.
+export function pruneWorkflowSkillOrphans({ skillsHome, claudeHome } = {}) {
+  const removed = [];
+  const pruneOne = (dir) => {
+    if (isSymlink(dir)) return;
+    const file = path.join(dir, "SKILL.md");
+    if (isSymlink(file)) return;
+    let content;
+    try { content = fs.readFileSync(file, "utf8"); } catch { return; }
+    if (!isOwnedSkillContent(content)) return;
+    fs.rmSync(dir, { recursive: true, force: true });
+  };
+  const home = skillsHome ?? path.join(os.homedir(), ".pi/agent/skills");
+  const piDir = path.join(home, "run-workflow");
+  if (fs.existsSync(piDir)) {
+    pruneOne(piDir);
+    if (!fs.existsSync(piDir)) removed.push("pi");
+  }
+  if (claudeHome != null) {
+    const cDir = path.join(claudeHome, "skills", "run-workflow");
+    if (fs.existsSync(cDir)) {
+      pruneOne(cDir);
+      if (!fs.existsSync(cDir)) removed.push("claude");
     }
   }
-  return { written, skipped };
+  return { removed };
 }
 
 export function renderRouterAgent({ root = REPO_ROOT, home } = {}) {
@@ -497,11 +440,15 @@ export function prune(root, manifest) {
     for (const f of fs.readdirSync(vibeDir)) {
       const m = f.match(/^(.*)\.toml$/);
       if (m && m[1] !== ROUTER_AGENT_NAME && !names.has(m[1])) {
-        let generated = false;
+        let content;
         try {
-          generated = fs.readFileSync(path.join(vibeDir, f), "utf8").includes(VIBE_MARKER);
-        } catch { /* unreadable: leave it alone */ }
-        if (generated) {
+          content = fs.readFileSync(path.join(vibeDir, f), "utf8");
+        } catch { /* unreadable: leave it alone */ continue; }
+        // A foreign generated marker (e.g. skill-workflows' orchestrator,
+        // written here by its installer per ADR-011) means the file is not
+        // ours to prune, even when its body carries our vibe boilerplate.
+        if (FOREIGN_GENERATED_MARKER_RE.test(content.split("\n", 5).join("\n"))) continue;
+        if (content.includes(VIBE_MARKER)) {
           fs.rmSync(path.join(vibeDir, f));
           vibeAgents.push(m[1]);
         }
@@ -858,16 +805,6 @@ export function statusOf(root, manifest, opts = {}) {
     () => renderClaudeRouterAgent({ root }));
   const vibeRouter = fileState(path.join(root, "agents-vibe", `${ROUTER_AGENT_NAME}.toml`),
     () => renderVibeRouterTOML({ root }));
-  // A malformed workflows.json is a surfaced error state (warning + field),
-  // never a crash — same shape as the name-collision warnings above.
-  let workflows = 0;
-  let workflowsError;
-  try {
-    workflows = loadWorkflows(root).workflows.length;
-  } catch (e) {
-    workflowsError = e.message;
-    warnings.push(`workflows.json: ${e.message}`);
-  }
   let claudeInstall = STATE.NA;
   const claudeHome = opts.claudeHome;
   if (opts.claudeError) {
@@ -883,11 +820,11 @@ export function statusOf(root, manifest, opts = {}) {
     && isSettled(r.vibe) && isSettled(r.claude)) && catalog === STATE.IN_SYNC
     && router === STATE.IN_SYNC && claudeRouter === STATE.IN_SYNC && vibeRouter === STATE.IN_SYNC
     && (claudeInstall === STATE.NA || claudeInstall === STATE.IN_SYNC);
-  return { rows, dropped, warnings, catalog, router, claudeRouter, vibeRouter, claudeInstall, workflows, workflowsError, exitCode: ok ? 0 : 1 };
+  return { rows, dropped, warnings, catalog, router, claudeRouter, vibeRouter, claudeInstall, exitCode: ok ? 0 : 1 };
 }
 
 export function printStatus(root, manifest, opts = {}) {
-  const { rows, dropped, warnings, catalog, router, claudeRouter, vibeRouter, claudeInstall, workflows, workflowsError, exitCode } = statusOf(root, manifest, opts);
+  const { rows, dropped, warnings, catalog, router, claudeRouter, vibeRouter, claudeInstall, exitCode } = statusOf(root, manifest, opts);
   // NAME column width tracks the longest name in play, with a 2-space gap, so
   // a name as long as the old constant (e.g. "security-audit") doesn't glue
   // straight into the next column.
@@ -901,7 +838,6 @@ export function printStatus(root, manifest, opts = {}) {
     lines.push(r.name.padEnd(nameWidth) + r.clone.padEnd(10) + String(r.skills).padEnd(7)
       + r.agent.padEnd(10) + r.vibe.padEnd(10) + r.claude);
   }
-  lines.push(`workflows: ${workflowsError ? `error (${workflowsError})` : workflows}`);
   lines.push(`claude install: ${claudeInstall}`);
   if (vibeRouter !== "in-sync") lines.push(`vibe router: ${vibeRouter}`);
   if (claudeRouter !== "in-sync") lines.push(`claude router: ${claudeRouter}`);
@@ -916,12 +852,6 @@ export function printStatus(root, manifest, opts = {}) {
 function runFlow(root, mode, { settingsPath, vibeConfigPath, skillsHome, claudeHome, gitTimeoutMs = GIT_TIMEOUT_MS, anchor }) {
   const manifest = loadManifest(root);
   const report = [];
-  // A malformed workflows.json never fails install/update — it is a printed
-  // warning and the flow continues (workflows are not installed yet anyway).
-  const wfState = manifestState(root);
-  if (!wfState.valid) {
-    report.push(`workflows.json: skipped (${wfState.error})`);
-  }
   let anyFailed = false;
   const oldSkillSets = new Map();
   if (mode === "update") {
@@ -1063,13 +993,18 @@ function runFlow(root, mode, { settingsPath, vibeConfigPath, skillsHome, claudeH
   report.push(`router agent: ${ROUTER_AGENT_NAME} written to agents/${ROUTER_AGENT_NAME}.md`);
   writeVibeRouterAgent(root, anchor);
   report.push(`vibe router agent: ${ROUTER_AGENT_NAME} written to agents-vibe/${ROUTER_AGENT_NAME}.toml`);
-  const orchResult = writeVibeOrchestrator(root, wfState);
-  report.push(`vibe orchestrator mode: ${orchResult.written ? "written" : orchResult.removed ? "removed" : orchResult.skippedUserFile ? "skipped (user-authored file present, left alone)" : "skipped"}`);
   writeClaudeRouterAgent(root, anchor);
   report.push(`claude router agent: ${ROUTER_AGENT_NAME} written to agents-claude/${ROUTER_AGENT_NAME}.md`);
-  const synced = syncGlobalSkills(root, skillsHome, wfState);
+  const synced = syncGlobalSkills(root, skillsHome);
   for (const f of synced.written) {
     report.push(`global skill: ${path.basename(path.dirname(f))} synced to ${tildePath(f)}`);
+  }
+  // ADR-011 de-extraction: prune the run-workflow skill installs this repo
+  // still owns; skill-workflows (if installed) re-ships them under its own
+  // marker and is never touched here.
+  const orphans = pruneWorkflowSkillOrphans({ skillsHome, claudeHome });
+  for (const h of orphans.removed) {
+    report.push(`run-workflow (${h}): pruned stale install — workflows moved to skill-workflows (ADR-011)`);
   }
   const piWritten = new Set(genResult.written);
   const vibeWritten = new Set(vibeResult.written);

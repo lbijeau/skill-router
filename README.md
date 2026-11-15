@@ -137,69 +137,20 @@ Then:
 
 ## Workflows
 
-A **workflow** chains generated agents into an ordered sequence: a name,
-steps, and for each step an agent, a task, and an output file the agent
-writes. Workflows live in an optional `workflows.json` at the repo root —
-the repo works fine without one. It ships three example workflows, one per
-shape: `design-review` (a two-step handoff), `security-review` (a single
-step), and `research-to-verdict` (a three-stage chain):
-
-```json
-{
-  "workflows": [
-    {
-      "name": "design-review",
-      "description": "Brainstorm a design with superpowers, then stress-test it",
-      "steps": [
-        { "agent": "superpowers", "task": "Brainstorm the requested feature and write the design doc", "output": "docs/design.md" },
-        { "agent": "ponytail", "task": "Critique docs/design.md bluntly; write your verdict and required changes", "output": "docs/design-review.md" }
-      ]
-    },
-    {
-      "name": "security-review",
-      "description": "Threat-model a feature area with Cloudflare's security-audit skill",
-      "steps": [
-        { "agent": "security-audit", "task": "Threat-model the requested feature area: who can reach this code, what they can influence, what they gain. Rank findings by exploitability and write the audit report", "output": "docs/security-review.md" }
-      ]
-    },
-    {
-      "name": "research-to-verdict",
-      "description": "Research a problem, review the architecture options, then take a verdict",
-      "steps": [
-        { "agent": "mattpocock", "task": "Research the requested problem and write up the findings and constraints", "output": "docs/research.md" },
-        { "agent": "addyosmani", "task": "Read docs/research.md and review the architecture options against it: trade-offs, failure modes, your recommendation", "output": "docs/architecture-review.md" },
-        { "agent": "ponytail", "task": "Read docs/research.md and docs/architecture-review.md and write the final verdict: which option, why, and what the other reviews got wrong", "output": "docs/verdict.md" }
-      ]
-    }
-  ]
-}
-```
-
-Run one through the `run-workflow` skill, installed for pi
-(`global-skills/run-workflow/`) and Claude Code
-(`global-skills-claude/run-workflow/`), with the manifest copied next to
-each `SKILL.md`. The skill dispatches each step's agent in order, verifies
-the step's output file exists and is non-empty, and checkpoints with you
-between every step — one human pause per step, never two steps without a
-human between them. Resuming a workflow skips any step whose output file
-already exists and is non-empty.
-
-On **Vibe**, select the generated `workflow-orchestrator` mode
-(`--agent workflow-orchestrator` or Shift+Tab): it dispatches each step's
-agent, writes the outputs, and checkpoints between steps — the same
-contract as the pi and Claude skills. The workflow list is baked in at
-generation time, so the mode is regenerated on install/update; writes
-prompt for approval, so workflows are an interactive-session feature on
-Vibe. (You can still run one by hand — read `workflows.json` and spawn
-each step's agent in order.)
-
-The three runners (pi skill, Claude Code skill, Vibe mode) implement one
-contract and change together — the lockstep duty in
-[ADR-010](docs/decisions/ADR-010-vibe-orchestrator-mode.md).
-
-Why workflows live here rather than in their own repository — and the
-trigger for splitting them out (a second agent source appearing) — is
-[ADR-009](docs/decisions/ADR-009-workflows-internal-seam.md).
+Workflows no longer live here: the module was extracted to the
+**skill-workflows** repository per
+[ADR-011](docs/decisions/ADR-011-extract-workflows-to-skill-workflows.md) —
+install that repo for the `run-workflow` skills (pi and Claude Code) and the
+Vibe `workflow-orchestrator` mode. Users who never install skill-workflows
+should delete the old installed `run-workflow` skills — and the first
+post-extraction `install`/`update` of skill-router does exactly that.
+While skill-workflows is installed, its installer writes the Vibe
+`workflow-orchestrator.toml` into this repo's `agents-vibe/` with its own
+marker: skill-router's prune never touches a foreign-marked file, and
+removing the skill-workflows checkout orphans that TOML — delete it
+manually. The first
+pruning them once (only the copies carrying skill-router's marker;
+skill-workflows-owned installs are never touched).
 
 ## Trust model
 
