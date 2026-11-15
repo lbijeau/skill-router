@@ -1628,6 +1628,27 @@ test("syncGlobalSkills does not copy a malformed workflows.json into the install
   clean(root); clean(skillsHome);
 });
 
+test("syncGlobalSkills prunes a stale installed manifest when the repo manifest goes bad", () => {
+  const root = tmp(); const skillsHome = tmp();
+  w(root, "repos.json", JSON.stringify({ repos: [] }));
+  w(root, "global-skills/run-workflow/SKILL.md", "---\nname: run-workflow\ndescription: d\n---\nbody\n");
+  w(root, "workflows.json", JSON.stringify({ workflows: [] }));
+  gen.syncGlobalSkills(root, skillsHome);
+  eq(fs.existsSync(path.join(skillsHome, "run-workflow", "workflows.json")), true);
+  // Repo manifest goes malformed: the stale installed copy must be pruned.
+  w(root, "workflows.json", JSON.stringify({ workflows: "not-an-array" }));
+  gen.syncGlobalSkills(root, skillsHome);
+  eq(fs.existsSync(path.join(skillsHome, "run-workflow", "workflows.json")), false);
+  // And when it is removed entirely.
+  w(root, "workflows.json", JSON.stringify({ workflows: [] }));
+  gen.syncGlobalSkills(root, skillsHome);
+  eq(fs.existsSync(path.join(skillsHome, "run-workflow", "workflows.json")), true);
+  fs.rmSync(path.join(root, "workflows.json"));
+  gen.syncGlobalSkills(root, skillsHome);
+  eq(fs.existsSync(path.join(skillsHome, "run-workflow", "workflows.json")), false);
+  clean(root); clean(skillsHome);
+});
+
 test("pi run-workflow SKILL.md names the manifest, dispatch loop, and checkpoint rule", () => {
   const body = fs.readFileSync(path.join(gen.REPO_ROOT, "global-skills/run-workflow/SKILL.md"), "utf8");
   assert(/workflows\.json/.test(body));
@@ -2539,6 +2560,43 @@ test("syncClaudeSkills does not copy a malformed workflows.json into the install
   w(root, "workflows.json", JSON.stringify({ workflows: "not-an-array" }));
   gen.syncClaudeSkills(root, home);
   eq(fs.existsSync(path.join(home, "run-workflow", "workflows.json")), false);
+  clean(root); clean(path.dirname(home));
+});
+
+test("syncClaudeSkills prunes a stale installed manifest when the repo manifest goes bad", () => {
+  const root = tmp(); const home = path.join(tmp(), "skills");
+  w(root, "repos.json", JSON.stringify({ repos: [] }));
+  w(root, "global-skills-claude/run-workflow/SKILL.md", fs.readFileSync(path.join(gen.REPO_ROOT, "global-skills-claude/run-workflow/SKILL.md"), "utf8"));
+  w(root, "workflows.json", JSON.stringify({ workflows: [] }));
+  gen.syncClaudeSkills(root, home);
+  eq(fs.existsSync(path.join(home, "run-workflow", "workflows.json")), true);
+  w(root, "workflows.json", JSON.stringify({ workflows: "not-an-array" }));
+  gen.syncClaudeSkills(root, home);
+  eq(fs.existsSync(path.join(home, "run-workflow", "workflows.json")), false);
+  w(root, "workflows.json", JSON.stringify({ workflows: [] }));
+  gen.syncClaudeSkills(root, home);
+  fs.rmSync(path.join(root, "workflows.json"));
+  gen.syncClaudeSkills(root, home);
+  eq(fs.existsSync(path.join(home, "run-workflow", "workflows.json")), false);
+  clean(root); clean(path.dirname(home));
+});
+
+test("claudeSkillsStatus flags a stale installed manifest", () => {
+  const root = tmp(); const home = path.join(tmp(), "skills");
+  w(root, "repos.json", JSON.stringify({ repos: [ { name: "a", url: "https://x/a", description: "d", persona: "p" } ] }));
+  w(root, "global-skills-claude/run-workflow/SKILL.md", fs.readFileSync(path.join(gen.REPO_ROOT, "global-skills-claude/run-workflow/SKILL.md"), "utf8"));
+  w(root, "workflows.json", JSON.stringify({ workflows: [] }));
+  gen.syncClaudeSkills(root, home);
+  eq(gen.claudeSkillsStatus(root, home).stale, false);
+  // Repo manifest changes (still valid): installed copy is now stale.
+  w(root, "workflows.json", JSON.stringify({ workflows: [ { name: "w", description: "d",
+    steps: [ { agent: "a", task: "t", output: "docs/o.md" } ] } ] }));
+  eq(gen.claudeSkillsStatus(root, home).stale, true);
+  gen.syncClaudeSkills(root, home);
+  eq(gen.claudeSkillsStatus(root, home).stale, false);
+  // Repo manifest removed: an installed copy is stale (would be pruned).
+  fs.rmSync(path.join(root, "workflows.json"));
+  eq(gen.claudeSkillsStatus(root, home).stale, true);
   clean(root); clean(path.dirname(home));
 });
 

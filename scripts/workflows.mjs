@@ -90,3 +90,14 @@ export function loadWorkflows(root) {
   });
   return { workflows };
 }
+
+// One parsed-and-validated view of the repo-root manifest, so callers that
+// need both the workflows and the validity (install warning, manifest copy
+// guards, status) do not each re-read and re-validate the file.
+export function manifestState(root) {
+  try {
+    return { valid: true, workflows: loadWorkflows(root).workflows };
+  } catch (e) {
+    return { valid: false, error: e.message, workflows: [] };
+  }
+}
