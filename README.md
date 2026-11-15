@@ -140,8 +140,9 @@ Then:
 A **workflow** chains generated agents into an ordered sequence: a name,
 steps, and for each step an agent, a task, and an output file the agent
 writes. Workflows live in an optional `workflows.json` at the repo root —
-the repo works fine without one. It currently holds one workflow,
-`design-review`:
+the repo works fine without one. It ships three example workflows, one per
+shape: `design-review` (a two-step handoff), `security-review` (a single
+step), and `research-to-verdict` (a three-stage chain):
 
 ```json
 {
@@ -152,6 +153,22 @@ the repo works fine without one. It currently holds one workflow,
       "steps": [
         { "agent": "superpowers", "task": "Brainstorm the requested feature and write the design doc", "output": "docs/design.md" },
         { "agent": "ponytail", "task": "Critique docs/design.md bluntly; write your verdict and required changes", "output": "docs/design-review.md" }
+      ]
+    },
+    {
+      "name": "security-review",
+      "description": "Threat-model a feature area with Cloudflare's security-audit skill",
+      "steps": [
+        { "agent": "security-audit", "task": "Threat-model the requested feature area: who can reach this code, what they can influence, what they gain. Rank findings by exploitability and write the audit report", "output": "docs/security-review.md" }
+      ]
+    },
+    {
+      "name": "research-to-verdict",
+      "description": "Research a problem, review the architecture options, then take a verdict",
+      "steps": [
+        { "agent": "mattpocock", "task": "Research the requested problem and write up the findings and constraints", "output": "docs/research.md" },
+        { "agent": "addyosmani", "task": "Read docs/research.md and review the architecture options against it: trade-offs, failure modes, your recommendation", "output": "docs/architecture-review.md" },
+        { "agent": "ponytail", "task": "Read docs/research.md and docs/architecture-review.md and write the final verdict: which option, why, and what the other reviews got wrong", "output": "docs/verdict.md" }
       ]
     }
   ]
