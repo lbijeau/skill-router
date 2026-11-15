@@ -3,6 +3,7 @@ import path from "node:path";
 import os from "node:os";
 import { NAME_RE, REPO_ROOT, ROUTER_AGENT_NAME, ROUTER_DESCRIPTION, STATE, atomicWrite, normalizeText, realPath, routerBodyLines, skillRows, yamlQuote } from "./common.mjs";
 import { discoverSkills } from "./discover.mjs";
+import { loadWorkflows } from "./workflows.mjs";
 
 // The legacy (pre-path) marker. A file ending in exactly this line predates
 // per-checkout scoping and is treated as this checkout's, per the migration
@@ -461,10 +462,13 @@ export function syncClaudeSkills(root, skillsHome) {
   // The run-workflow skill reads the manifest that sits next to its own
   // SKILL.md: copy the repo-root workflows.json into the installed dir —
   // but only when the run-workflow skill itself is ours (not refused).
-  // Absent manifest = nothing to copy; install must not break.
+  // Absent manifest = nothing to copy; install must not break. A malformed
+  // manifest is also skipped (runFlow already prints that warning).
   const manifest = path.join(root, "workflows.json");
+  let manifestValid = false;
+  try { loadWorkflows(root); manifestValid = true; } catch {}
   const runWorkflow = claudeSkillSources(root).find(s => s.name === "run-workflow");
-  if (runWorkflow && !refused.includes("run-workflow") && fs.existsSync(manifest)) {
+  if (manifestValid && runWorkflow && !refused.includes("run-workflow") && fs.existsSync(manifest)) {
     const dir = path.join(skillsHome, "run-workflow");
     fs.mkdirSync(dir, { recursive: true });
     atomicWrite(path.join(dir, "workflows.json"), fs.readFileSync(manifest, "utf8"));

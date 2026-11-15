@@ -1602,6 +1602,7 @@ test("syncGlobalSkills installs run-workflow alongside route-skill", () => {
 test("syncGlobalSkills copies the repo-root workflows.json into the installed run-workflow dir", () => {
   const root = tmp(); const skillsHome = tmp();
   const manifest = JSON.stringify({ workflows: [] });
+  w(root, "repos.json", JSON.stringify({ repos: [] }));
   w(root, "global-skills/run-workflow/SKILL.md", "---\nname: run-workflow\ndescription: d\n---\nbody\n");
   w(root, "workflows.json", manifest);
   gen.syncGlobalSkills(root, skillsHome);
@@ -1614,6 +1615,15 @@ test("syncGlobalSkills skips the manifest copy silently when workflows.json is a
   w(root, "global-skills/run-workflow/SKILL.md", "---\nname: run-workflow\ndescription: d\n---\nbody\n");
   const r = gen.syncGlobalSkills(root, skillsHome);
   eq(r.written.length, 1);
+  eq(fs.existsSync(path.join(skillsHome, "run-workflow", "workflows.json")), false);
+  clean(root); clean(skillsHome);
+});
+
+test("syncGlobalSkills does not copy a malformed workflows.json into the installed run-workflow dir", () => {
+  const root = tmp(); const skillsHome = tmp();
+  w(root, "global-skills/run-workflow/SKILL.md", "---\nname: run-workflow\ndescription: d\n---\nbody\n");
+  w(root, "workflows.json", JSON.stringify({ workflows: "not-an-array" }));
+  gen.syncGlobalSkills(root, skillsHome);
   eq(fs.existsSync(path.join(skillsHome, "run-workflow", "workflows.json")), false);
   clean(root); clean(skillsHome);
 });
@@ -2514,10 +2524,21 @@ test("syncClaudeSkills installs run-workflow alongside route-skill", () => {
   w(root, "global-skills-claude/route-skill/SKILL.md", src);
   w(root, "global-skills-claude/run-workflow/SKILL.md", "---\nname: run-workflow\ndescription: d\n---\nbody\n");
   const manifest = JSON.stringify({ workflows: [] });
+  w(root, "repos.json", JSON.stringify({ repos: [] }));
   w(root, "workflows.json", manifest);
   const r = gen.syncClaudeSkills(root, home);
   eq(r.written.includes("run-workflow"), true);
   eq(fs.readFileSync(path.join(home, "run-workflow", "workflows.json"), "utf8"), manifest);
+  clean(root); clean(path.dirname(home));
+});
+
+test("syncClaudeSkills does not copy a malformed workflows.json into the installed run-workflow dir", () => {
+  const root = tmp(); const home = path.join(tmp(), "skills");
+  w(root, "global-skills-claude/route-skill/SKILL.md", fs.readFileSync(path.join(gen.REPO_ROOT, "global-skills-claude/route-skill/SKILL.md"), "utf8"));
+  w(root, "global-skills-claude/run-workflow/SKILL.md", "---\nname: run-workflow\ndescription: d\n---\nbody\n");
+  w(root, "workflows.json", JSON.stringify({ workflows: "not-an-array" }));
+  gen.syncClaudeSkills(root, home);
+  eq(fs.existsSync(path.join(home, "run-workflow", "workflows.json")), false);
   clean(root); clean(path.dirname(home));
 });
 
