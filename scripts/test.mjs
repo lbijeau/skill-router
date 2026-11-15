@@ -524,6 +524,47 @@ test("status: exit rules incl. expected absence for zero-skill entries", () => {
   clean(root);
 });
 
+test("statusOf includes a workflows count", () => {
+  const root = tmp();
+  const manifest = { repos: [
+    { name: "one", url: "https://github.com/x/y", description: "d", persona: "p" }]};
+  w(root, "repos.json", JSON.stringify(manifest));
+  w(root, "workflows.json", JSON.stringify({ workflows: [
+    { name: "design-review", description: "two-step review", steps: [
+      { agent: "one", task: "write the design", output: "docs/design.md" },
+      { agent: "one", task: "critique it", output: "docs/review.md" },
+    ]},
+  ]}));
+  const s = gen.statusOf(root, manifest);
+  eq(s.workflows, 1);
+  eq(s.workflowsError, undefined);
+  clean(root);
+});
+
+test("statusOf is unchanged when workflows.json is absent", () => {
+  const root = tmp();
+  const manifest = { repos: [
+    { name: "one", url: "https://github.com/x/y", description: "d", persona: "p" }]};
+  w(root, "repos.json", JSON.stringify(manifest));
+  const s = gen.statusOf(root, manifest);
+  eq(s.workflows, 0);
+  eq(s.workflowsError, undefined);
+  clean(root);
+});
+
+test("statusOf surfaces a malformed workflows.json as an error state", () => {
+  const root = tmp();
+  const manifest = { repos: [
+    { name: "one", url: "https://github.com/x/y", description: "d", persona: "p" }]};
+  w(root, "repos.json", JSON.stringify(manifest));
+  w(root, "workflows.json", "{ not json !!!");
+  const s = gen.statusOf(root, manifest);
+  eq(s.workflows, 0);
+  eq(/workflows/.test(s.workflowsError), true);
+  eq(s.warnings.some(x => /workflows/.test(x)), true);
+  clean(root);
+});
+
 test("status: zero-skill leftover TOML is stale and fails exit", () => {
   const root = tmp();
   const manifest = { repos: [
@@ -1924,7 +1965,8 @@ test("printStatus: catalog/router values align under their header columns", () =
   eq(values.slice(catalogStart, catalogStart + 10).trim(), "in-sync");
   eq(values.slice(catalogStart + 10).trim(), "in-sync");
   eq(lines[2].slice(claudeStart, catalogStart).trim(), "in-sync");    // claude column under its header
-  eq(lines[3], "claude install: n/a");                                // line after the data rows
+  eq(lines[3], "workflows: 0");                                    // workflows count line after the data rows
+  eq(lines[4], "claude install: n/a");
   clean(root);
 });
 

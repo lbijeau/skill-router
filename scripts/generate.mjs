@@ -6,6 +6,7 @@ import { pathToFileURL } from "node:url";
 import { NAME_RE, REPO_ROOT, ROUTER_AGENT_NAME, ROUTER_DESCRIPTION, STATE, atomicWrite, normalizeText, realPath, routerBodyLines, skillRows, tildePath, yamlQuote } from "./common.mjs";
 import { discoverSkills } from "./discover.mjs";
 import { claudeInstallStatus, claudeSkipReason, isOwnedClaudeAgent, pruneClaudeAgents, renderClaudeAgentFile, renderClaudeRouterAgent, resolveClaudeHome, runClaudeInstall, writeClaudeAgentFiles, writeClaudeRouterAgent } from "./claude.mjs";
+import { loadWorkflows } from "./workflows.mjs";
 
 export * from "./common.mjs";
 export * from "./discover.mjs";
@@ -764,6 +765,16 @@ export function statusOf(root, manifest, opts = {}) {
     () => renderClaudeRouterAgent({ root }));
   const vibeRouter = fileState(path.join(root, "agents-vibe", `${ROUTER_AGENT_NAME}.toml`),
     () => renderVibeRouterTOML({ root }));
+  // A malformed workflows.json is a surfaced error state (warning + field),
+  // never a crash — same shape as the name-collision warnings above.
+  let workflows = 0;
+  let workflowsError;
+  try {
+    workflows = loadWorkflows(root).workflows.length;
+  } catch (e) {
+    workflowsError = e.message;
+    warnings.push(`workflows.json: ${e.message}`);
+  }
   let claudeInstall = STATE.NA;
   const claudeHome = opts.claudeHome;
   if (opts.claudeError) {
@@ -779,11 +790,11 @@ export function statusOf(root, manifest, opts = {}) {
     && isSettled(r.vibe) && isSettled(r.claude)) && catalog === STATE.IN_SYNC
     && router === STATE.IN_SYNC && claudeRouter === STATE.IN_SYNC && vibeRouter === STATE.IN_SYNC
     && (claudeInstall === STATE.NA || claudeInstall === STATE.IN_SYNC);
-  return { rows, dropped, warnings, catalog, router, claudeRouter, vibeRouter, claudeInstall, exitCode: ok ? 0 : 1 };
+  return { rows, dropped, warnings, catalog, router, claudeRouter, vibeRouter, claudeInstall, workflows, workflowsError, exitCode: ok ? 0 : 1 };
 }
 
 export function printStatus(root, manifest, opts = {}) {
-  const { rows, dropped, warnings, catalog, router, claudeRouter, vibeRouter, claudeInstall, exitCode } = statusOf(root, manifest, opts);
+  const { rows, dropped, warnings, catalog, router, claudeRouter, vibeRouter, claudeInstall, workflows, workflowsError, exitCode } = statusOf(root, manifest, opts);
   // NAME column width tracks the longest name in play, with a 2-space gap, so
   // a name as long as the old constant (e.g. "security-audit") doesn't glue
   // straight into the next column.
@@ -797,6 +808,7 @@ export function printStatus(root, manifest, opts = {}) {
     lines.push(r.name.padEnd(nameWidth) + r.clone.padEnd(10) + String(r.skills).padEnd(7)
       + r.agent.padEnd(10) + r.vibe.padEnd(10) + r.claude);
   }
+  lines.push(`workflows: ${workflowsError ? `error (${workflowsError})` : workflows}`);
   lines.push(`claude install: ${claudeInstall}`);
   if (vibeRouter !== "in-sync") lines.push(`vibe router: ${vibeRouter}`);
   if (claudeRouter !== "in-sync") lines.push(`claude router: ${claudeRouter}`);
@@ -811,6 +823,13 @@ export function printStatus(root, manifest, opts = {}) {
 function runFlow(root, mode, { settingsPath, vibeConfigPath, skillsHome, claudeHome, gitTimeoutMs = GIT_TIMEOUT_MS, anchor }) {
   const manifest = loadManifest(root);
   const report = [];
+  // A malformed workflows.json never fails install/update — it is a printed
+  // warning and the flow continues (workflows are not installed yet anyway).
+  try {
+    loadWorkflows(root);
+  } catch (e) {
+    report.push(`workflows.json: skipped (${e.message})`);
+  }
   let anyFailed = false;
   const oldSkillSets = new Map();
   if (mode === "update") {
