@@ -184,12 +184,18 @@ between every step — one human pause per step, never two steps without a
 human between them. Resuming a workflow skips any step whose output file
 already exists and is non-empty.
 
-On **Vibe** there is no skill runner (skills are disabled for Vibe
-agents), so run a workflow by reading `workflows.json` yourself and
-spawning each step's agent in order — verify the output file after each
-step and pause for a human between steps, the same contract the pi and
-Claude skills enforce. A generated Vibe orchestrator agent may follow
-later.
+On **Vibe**, select the generated `workflow-orchestrator` mode
+(`--agent workflow-orchestrator` or Shift+Tab): it dispatches each step's
+agent, writes the outputs, and checkpoints between steps — the same
+contract as the pi and Claude skills. The workflow list is baked in at
+generation time, so the mode is regenerated on install/update; writes
+prompt for approval, so workflows are an interactive-session feature on
+Vibe. (You can still run one by hand — read `workflows.json` and spawn
+each step's agent in order.)
+
+The three runners (pi skill, Claude Code skill, Vibe mode) implement one
+contract and change together — the lockstep duty in
+[ADR-010](docs/decisions/ADR-010-vibe-orchestrator-mode.md).
 
 Why workflows live here rather than in their own repository — and the
 trigger for splitting them out (a second agent source appearing) — is
