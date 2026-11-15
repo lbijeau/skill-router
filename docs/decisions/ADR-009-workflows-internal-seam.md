@@ -4,7 +4,11 @@ Date: 2026-11-14
 
 ## Status
 
-Accepted.
+Accepted. **Closed 2026-11-14 by [ADR-011](ADR-011-extract-workflows-to-skill-workflows.md):**
+the split trigger fired (a second agent source — agent-roster — needed to
+appear in a workflow), the module was extracted to skill-workflows, and the
+seam held: the extraction moved `workflows.json`, the validator, and the
+three runners out without touching `repos.json` or generation.
 
 ## Context
 

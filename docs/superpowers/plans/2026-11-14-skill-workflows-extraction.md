@@ -96,9 +96,9 @@
 - **Orphan prune (council amendment):** the de-extraction prunes the installed `run-workflow` skills skill-router still owns (they carry skill-router's marker) — one last `syncGlobalSkills`-family pass that removes them; test with a fixture home.
 - Keep: everything else; the suite must stay green with the workflows tests removed.
 
-- [ ] **Step 1: Remove the module + tests; run the suite** — GREEN.
-- [ ] **Step 2: README + ADR-009 closing note.**
-- [ ] **Step 3: Real update** — run skill-router's `./install.sh update`; verify the old runner skills are **not** re-shipped and (with skill-workflows installed) the Vibe mode still exists with skill-workflows' marker.
+- [x] **Step 1: Remove the module + tests; run the suite** — GREEN.
+- [x] **Step 2: README + ADR-009 closing note.**
+- [x] **Step 3: Real update** — run skill-router's `./install.sh update`; verify the old runner skills are **not** re-shipped and (with skill-workflows installed) the Vibe mode still exists with skill-workflows' marker.
 - [ ] **Step 4: Commit.**
 
 ### Task 6: agent-roster integration

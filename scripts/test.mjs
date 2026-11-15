@@ -358,78 +358,9 @@ test("renderVibeAgentTOML: rows outside home stay absolute", () => {
   eq(out.includes("- a — /opt/elsewhere/skills/x/a/SKILL.md"), true);
 });
 
-test("renderVibeOrchestratorTOML emits a mode TOML with baked workflows", () => {
-  const toml = gen.renderVibeOrchestratorTOML([
-    { name: "design-review", description: "d", steps: [
-      { agent: "superpowers", task: "Brainstorm the feature", output: "docs/design.md" },
-      { agent: "ponytail", task: "Critique it", output: "docs/design-review.md" } ] },
-  ]);
-  assert(/agent_type = "agent"/.test(toml));
-  assert(/disabled_tools = \["skill"\]/.test(toml));
-  assert(/ask_user_question/.test(toml) && /task/.test(toml) && /write_file/.test(toml));
-  assert(toml.includes("design-review"));
-  assert(toml.includes("Brainstorm the feature"));   // task text baked, escaped
-  assert(toml.includes("docs/design.md"));
-  assert(/checkpoint/i.test(toml));                   // ADR-009 contract in prose
-  assert(/already exists and is non-empty/.test(toml)); // resume rule
-  // every workflow and step appears; no bare """ breakage from quotes in task text
-  const weird = gen.renderVibeOrchestratorTOML([
-    { name: "w", description: 'say "hi"', steps: [
-      { agent: "a", task: 'write "quoted" text', output: "docs/o.md" } ] }]);
-  assert(weird.includes('\\"quoted\\"')); // quotes escaped — no masked regression behind a disjunction
-});
 
-test("writeVibeOrchestrator writes the mode for a valid manifest, removes it when the manifest goes bad", () => {
-  const root = tmp();
-  w(root, "repos.json", JSON.stringify({ repos: [
-    { name: "one", url: "https://github.com/x/y", description: "d", persona: "p" }] }));
-  w(root, "workflows.json", JSON.stringify({ workflows: [
-    { name: "design-review", description: "two-step review", steps: [
-      { agent: "one", task: "write the design", output: "docs/design.md" } ] } ] }));
-  const orch = path.join(root, "agents-vibe", "workflow-orchestrator.toml");
-  const r1 = gen.writeVibeOrchestrator(root, wf.manifestState(root));
-  eq(r1.written, true);
-  eq(r1.removed, false);
-  const toml = fs.readFileSync(orch, "utf8");
-  eq(toml.includes("design-review"), true);
-  // malformed workflows.json → the generated file is pruned
-  w(root, "workflows.json", "{ not json !!!");
-  const r2 = gen.writeVibeOrchestrator(root, wf.manifestState(root));
-  eq(r2.written, false);
-  eq(r2.removed, true);
-  eq(fs.existsSync(orch), false);
-  // absent workflows.json → still gone, no error
-  fs.rmSync(path.join(root, "workflows.json"), { force: true });
-  const r3 = gen.writeVibeOrchestrator(root, wf.manifestState(root));
-  eq(r3.written, false);
-  eq(r3.removed, false);
-  eq(fs.existsSync(orch), false);
-  clean(root);
-});
 
-test("writeVibeOrchestrator never removes a user-authored file", () => {
-  const root = tmp();
-  const orch = path.join(root, "agents-vibe", "workflow-orchestrator.toml");
-  w(root, "agents-vibe/workflow-orchestrator.toml", "hand-written, no marker\n");
-  const r = gen.writeVibeOrchestrator(root, wf.manifestState(root)); // no workflows.json
-  eq(r.written, false);
-  eq(r.removed, false);
-  eq(fs.readFileSync(orch, "utf8"), "hand-written, no marker\n");
-  clean(root);
-});
 
-test("writeVibeOrchestrator never clobbers a user-authored file on the write path", () => {
-  const root = tmp();
-  w(root, "repos.json", JSON.stringify({ repos: [] }));
-  w(root, "workflows.json", JSON.stringify({ workflows: [
-    { name: "w", description: "d", steps: [ { agent: "a", task: "t", output: "docs/o.md" } ] } ] }));
-  w(root, "agents-vibe/workflow-orchestrator.toml", "hand-written, no marker\n");
-  const r = gen.writeVibeOrchestrator(root, wf.manifestState(root)); // valid manifest
-  eq(r.written, false);
-  eq(r.skippedUserFile, true);
-  eq(fs.readFileSync(path.join(root, "agents-vibe", "workflow-orchestrator.toml"), "utf8"), "hand-written, no marker\n");
-  clean(root);
-});
 
 test("writeVibeAgentFiles: writes, idempotent, removes zero-skill leftovers", () => {
   const root = tmp();
@@ -597,46 +528,8 @@ test("status: exit rules incl. expected absence for zero-skill entries", () => {
   clean(root);
 });
 
-test("statusOf includes a workflows count", () => {
-  const root = tmp();
-  const manifest = { repos: [
-    { name: "one", url: "https://github.com/x/y", description: "d", persona: "p" }]};
-  w(root, "repos.json", JSON.stringify(manifest));
-  w(root, "workflows.json", JSON.stringify({ workflows: [
-    { name: "design-review", description: "two-step review", steps: [
-      { agent: "one", task: "write the design", output: "docs/design.md" },
-      { agent: "one", task: "critique it", output: "docs/review.md" },
-    ]},
-  ]}));
-  const s = gen.statusOf(root, manifest);
-  eq(s.workflows, 1);
-  eq(s.workflowsError, undefined);
-  clean(root);
-});
 
-test("statusOf is unchanged when workflows.json is absent", () => {
-  const root = tmp();
-  const manifest = { repos: [
-    { name: "one", url: "https://github.com/x/y", description: "d", persona: "p" }]};
-  w(root, "repos.json", JSON.stringify(manifest));
-  const s = gen.statusOf(root, manifest);
-  eq(s.workflows, 0);
-  eq(s.workflowsError, undefined);
-  clean(root);
-});
 
-test("statusOf surfaces a malformed workflows.json as an error state", () => {
-  const root = tmp();
-  const manifest = { repos: [
-    { name: "one", url: "https://github.com/x/y", description: "d", persona: "p" }]};
-  w(root, "repos.json", JSON.stringify(manifest));
-  w(root, "workflows.json", "{ not json !!!");
-  const s = gen.statusOf(root, manifest);
-  eq(s.workflows, 0);
-  eq(/workflows/.test(s.workflowsError), true);
-  eq(s.warnings.some(x => /workflows/.test(x)), true);
-  clean(root);
-});
 
 test("status: zero-skill leftover TOML is stale and fails exit", () => {
   const root = tmp();
@@ -1662,79 +1555,12 @@ test("syncGlobalSkills: copies byte-identical, idempotent, skips non-skills", ()
   clean(root); clean(skillsHome);
 });
 
-test("syncGlobalSkills installs run-workflow alongside route-skill", () => {
-  const root = tmp();
-  w(root, "global-skills/route-skill/SKILL.md", "---\nname: route-skill\ndescription: d\n---\nbody\n");
-  w(root, "global-skills/run-workflow/SKILL.md", "---\nname: run-workflow\ndescription: d\n---\nbody\n");
-  const home = path.join(root, "skills-home");
-  const { written } = gen.syncGlobalSkills(root, home);
-  eq(written.filter(f => f.includes("run-workflow")).length, 1);
-  clean(root);
-});
 
-test("syncGlobalSkills copies the repo-root workflows.json into the installed run-workflow dir", () => {
-  const root = tmp(); const skillsHome = tmp();
-  const manifest = JSON.stringify({ workflows: [] });
-  w(root, "repos.json", JSON.stringify({ repos: [] }));
-  w(root, "global-skills/run-workflow/SKILL.md", "---\nname: run-workflow\ndescription: d\n---\nbody\n");
-  w(root, "workflows.json", manifest);
-  gen.syncGlobalSkills(root, skillsHome);
-  eq(fs.readFileSync(path.join(skillsHome, "run-workflow", "workflows.json"), "utf8"), manifest);
-  clean(root); clean(skillsHome);
-});
 
-test("syncGlobalSkills skips the manifest copy silently when workflows.json is absent", () => {
-  const root = tmp(); const skillsHome = tmp();
-  w(root, "global-skills/run-workflow/SKILL.md", "---\nname: run-workflow\ndescription: d\n---\nbody\n");
-  const r = gen.syncGlobalSkills(root, skillsHome);
-  eq(r.written.length, 1);
-  eq(fs.existsSync(path.join(skillsHome, "run-workflow", "workflows.json")), false);
-  clean(root); clean(skillsHome);
-});
 
-test("syncGlobalSkills does not copy a malformed workflows.json into the installed run-workflow dir", () => {
-  const root = tmp(); const skillsHome = tmp();
-  w(root, "global-skills/run-workflow/SKILL.md", "---\nname: run-workflow\ndescription: d\n---\nbody\n");
-  w(root, "workflows.json", JSON.stringify({ workflows: "not-an-array" }));
-  gen.syncGlobalSkills(root, skillsHome);
-  eq(fs.existsSync(path.join(skillsHome, "run-workflow", "workflows.json")), false);
-  clean(root); clean(skillsHome);
-});
 
-test("syncGlobalSkills prunes a stale installed manifest when the repo manifest goes bad", () => {
-  const root = tmp(); const skillsHome = tmp();
-  w(root, "repos.json", JSON.stringify({ repos: [] }));
-  w(root, "global-skills/run-workflow/SKILL.md", "---\nname: run-workflow\ndescription: d\n---\nbody\n");
-  w(root, "workflows.json", JSON.stringify({ workflows: [] }));
-  gen.syncGlobalSkills(root, skillsHome);
-  eq(fs.existsSync(path.join(skillsHome, "run-workflow", "workflows.json")), true);
-  // Repo manifest goes malformed: the stale installed copy must be pruned.
-  w(root, "workflows.json", JSON.stringify({ workflows: "not-an-array" }));
-  gen.syncGlobalSkills(root, skillsHome);
-  eq(fs.existsSync(path.join(skillsHome, "run-workflow", "workflows.json")), false);
-  // And when it is removed entirely.
-  w(root, "workflows.json", JSON.stringify({ workflows: [] }));
-  gen.syncGlobalSkills(root, skillsHome);
-  eq(fs.existsSync(path.join(skillsHome, "run-workflow", "workflows.json")), true);
-  fs.rmSync(path.join(root, "workflows.json"));
-  gen.syncGlobalSkills(root, skillsHome);
-  eq(fs.existsSync(path.join(skillsHome, "run-workflow", "workflows.json")), false);
-  clean(root); clean(skillsHome);
-});
 
-test("pi run-workflow SKILL.md names the manifest, dispatch loop, and checkpoint rule", () => {
-  const body = fs.readFileSync(path.join(gen.REPO_ROOT, "global-skills/run-workflow/SKILL.md"), "utf8");
-  assert(/workflows\.json/.test(body));
-  assert(/subagent/.test(body));
-  assert(/checkpoint/i.test(body));
-});
 
-test("claude run-workflow SKILL.md names the manifest, Task tool, and checkpoint rule", () => {
-  const body = fs.readFileSync(path.join(gen.REPO_ROOT, "global-skills-claude/run-workflow/SKILL.md"), "utf8");
-  assert(/workflows\.json/.test(body));
-  assert(/Task/.test(body));
-  assert(/checkpoint/i.test(body));
-});
 
 test("renderRouterAgent: frontmatter shape and persona body", () => {
   const home = "/fake/home";
@@ -2112,8 +1938,7 @@ test("printStatus: catalog/router values align under their header columns", () =
   eq(values.slice(catalogStart, catalogStart + 10).trim(), "in-sync");
   eq(values.slice(catalogStart + 10).trim(), "in-sync");
   eq(lines[2].slice(claudeStart, catalogStart).trim(), "in-sync");    // claude column under its header
-  eq(lines[3], "workflows: 0");                                    // workflows count line after the data rows
-  eq(lines[4], "claude install: n/a");
+  eq(lines[3], "claude install: n/a");
   clean(root);
 });
 
@@ -2612,66 +2437,9 @@ test("syncClaudeSkills: writes route-skill; refuses unmarked file and symlinked 
   clean(root); clean(path.dirname(home));
 });
 
-test("syncClaudeSkills installs run-workflow alongside route-skill", () => {
-  const root = tmp(); const home = path.join(tmp(), "skills");
-  const src = fs.readFileSync(path.join(gen.REPO_ROOT, "global-skills-claude/route-skill/SKILL.md"), "utf8");
-  w(root, "global-skills-claude/route-skill/SKILL.md", src);
-  w(root, "global-skills-claude/run-workflow/SKILL.md", "---\nname: run-workflow\ndescription: d\n---\nbody\n");
-  const manifest = JSON.stringify({ workflows: [] });
-  w(root, "repos.json", JSON.stringify({ repos: [] }));
-  w(root, "workflows.json", manifest);
-  const r = gen.syncClaudeSkills(root, home);
-  eq(r.written.includes("run-workflow"), true);
-  eq(fs.readFileSync(path.join(home, "run-workflow", "workflows.json"), "utf8"), manifest);
-  clean(root); clean(path.dirname(home));
-});
 
-test("syncClaudeSkills does not copy a malformed workflows.json into the installed run-workflow dir", () => {
-  const root = tmp(); const home = path.join(tmp(), "skills");
-  w(root, "global-skills-claude/route-skill/SKILL.md", fs.readFileSync(path.join(gen.REPO_ROOT, "global-skills-claude/route-skill/SKILL.md"), "utf8"));
-  w(root, "global-skills-claude/run-workflow/SKILL.md", "---\nname: run-workflow\ndescription: d\n---\nbody\n");
-  w(root, "workflows.json", JSON.stringify({ workflows: "not-an-array" }));
-  gen.syncClaudeSkills(root, home);
-  eq(fs.existsSync(path.join(home, "run-workflow", "workflows.json")), false);
-  clean(root); clean(path.dirname(home));
-});
 
-test("syncClaudeSkills prunes a stale installed manifest when the repo manifest goes bad", () => {
-  const root = tmp(); const home = path.join(tmp(), "skills");
-  w(root, "repos.json", JSON.stringify({ repos: [] }));
-  w(root, "global-skills-claude/run-workflow/SKILL.md", fs.readFileSync(path.join(gen.REPO_ROOT, "global-skills-claude/run-workflow/SKILL.md"), "utf8"));
-  w(root, "workflows.json", JSON.stringify({ workflows: [] }));
-  gen.syncClaudeSkills(root, home);
-  eq(fs.existsSync(path.join(home, "run-workflow", "workflows.json")), true);
-  w(root, "workflows.json", JSON.stringify({ workflows: "not-an-array" }));
-  gen.syncClaudeSkills(root, home);
-  eq(fs.existsSync(path.join(home, "run-workflow", "workflows.json")), false);
-  w(root, "workflows.json", JSON.stringify({ workflows: [] }));
-  gen.syncClaudeSkills(root, home);
-  fs.rmSync(path.join(root, "workflows.json"));
-  gen.syncClaudeSkills(root, home);
-  eq(fs.existsSync(path.join(home, "run-workflow", "workflows.json")), false);
-  clean(root); clean(path.dirname(home));
-});
 
-test("claudeSkillsStatus flags a stale installed manifest", () => {
-  const root = tmp(); const home = path.join(tmp(), "skills");
-  w(root, "repos.json", JSON.stringify({ repos: [ { name: "a", url: "https://x/a", description: "d", persona: "p" } ] }));
-  w(root, "global-skills-claude/run-workflow/SKILL.md", fs.readFileSync(path.join(gen.REPO_ROOT, "global-skills-claude/run-workflow/SKILL.md"), "utf8"));
-  w(root, "workflows.json", JSON.stringify({ workflows: [] }));
-  gen.syncClaudeSkills(root, home);
-  eq(gen.claudeSkillsStatus(root, home).stale, false);
-  // Repo manifest changes (still valid): installed copy is now stale.
-  w(root, "workflows.json", JSON.stringify({ workflows: [ { name: "w", description: "d",
-    steps: [ { agent: "a", task: "t", output: "docs/o.md" } ] } ] }));
-  eq(gen.claudeSkillsStatus(root, home).stale, true);
-  gen.syncClaudeSkills(root, home);
-  eq(gen.claudeSkillsStatus(root, home).stale, false);
-  // Repo manifest removed: an installed copy is stale (would be pruned).
-  fs.rmSync(path.join(root, "workflows.json"));
-  eq(gen.claudeSkillsStatus(root, home).stale, true);
-  clean(root); clean(path.dirname(home));
-});
 
 test("install: route-skill for claude lands in the claude skills dir and never in the pi skills home", () => {
   const f = claudeFixture({ claudeAgentsDir: true }); const pi = path.join(f.root, "pi-skills");
@@ -3503,114 +3271,81 @@ test("landing page: masthead, lede and hero stats match repos.json, catalog and 
 });
 
 
-import * as wf from "./workflows.mjs";
+// ---- ADR-011: de-extraction (workflows moved to skill-workflows) ----
 
-function wfRoot(repos) {
-  const root = tmp();
-  w(root, "repos.json", JSON.stringify({ repos }));
-  return root;
+const FOREIGN_VIBE_MARKER = "# skill-workflows: generated — safe to prune";
+
+function ownedRunWorkflowSkill(owner) {
+  return "---\nname: run-workflow\ndescription: d\n---\n\n<!-- Generated-style boilerplate; overwritten by " + owner
+    + " install/update.\nPut custom behavior in your own AGENTS.md or say it in the invocation. -->\n\nbody\n";
 }
 
-test("loadWorkflows returns [] when workflows.json is absent", () => {
+test("prune: a foreign-marked workflow-orchestrator.toml in agents-vibe survives a full install", () => {
+  const f = claudeFixture({});
+  const orch = path.join(f.root, "agents-vibe", "workflow-orchestrator.toml");
+  // Foreign-owned file: skill-workflows' marker, over content that would
+  // otherwise look exactly like skill-router's generated vibe boilerplate.
+  w(f.root, "agents-vibe/workflow-orchestrator.toml",
+    FOREIGN_VIBE_MARKER + "\nagent_type = \"agent\"\ninstructions = \"\"\"\n" + gen.VIBE_MARKER + "\n\"\"\"\n");
+  const r = gen.runInstall(f.root, { settingsPath: f.sp, vibeConfigPath: f.vp,
+    skillsHome: path.join(f.root, "pi-skills"), claudeHome: f.claude });
+  eq(r.exitCode, 0);
+  eq(fs.existsSync(orch), true);
+  eq(fs.readFileSync(orch, "utf8").startsWith(FOREIGN_VIBE_MARKER), true);
+  clean(f.root); clean(f.claude);
+});
+
+test("prune skips a foreign-marked vibe TOML but still removes skill-router's own stale one", () => {
   const root = tmp();
-  w(root, "repos.json", JSON.stringify({ repos: [
-    { name: "a", url: "https://x/a", description: "d", persona: "p" } ] }));
-  const { workflows } = wf.loadWorkflows(root);
-  eq(workflows.length, 0);
+  const manifest = { repos: [
+    { name: "one", url: "https://github.com/x/y", description: "d", persona: "p" }]};
+  w(root, "repos.json", JSON.stringify(manifest));
+  w(root, "agents-vibe/workflow-orchestrator.toml",
+    FOREIGN_VIBE_MARKER + "\nagent_type = \"agent\"\ninstructions = \"\"\"\n" + gen.VIBE_MARKER + "\n\"\"\"\n");
+  w(root, "agents-vibe/stale.toml", gen.renderVibeAgentTOML({ name: "stale", description: "d", persona: "p" }, []));
+  const pruned = gen.prune(root, gen.loadManifest(root));
+  eq(fs.existsSync(path.join(root, "agents-vibe/workflow-orchestrator.toml")), true);
+  eq(pruned.vibeAgents.includes("stale"), true);
+  eq(fs.existsSync(path.join(root, "agents-vibe/stale.toml")), false);
   clean(root);
 });
 
-test("loadWorkflows returns a valid workflow with steps", () => {
-  const root = tmp();
-  w(root, "repos.json", JSON.stringify({ repos: [
-    { name: "a", url: "https://x/a", description: "d", persona: "p" },
-    { name: "b", url: "https://x/b", description: "d", persona: "p" } ] }));
-  w(root, "workflows.json", JSON.stringify({ workflows: [
-    { name: "review", description: "Two-pass review",
-      steps: [
-        { agent: "a", task: "Review the code", output: "docs/review-a.md" },
-        { agent: "b", task: "Audit the review", output: "docs/review-b.md" } ] } ] }));
-  const { workflows } = wf.loadWorkflows(root);
-  eq(workflows.length, 1);
-  eq(workflows[0].name, "review");
-  eq(workflows[0].steps[1].agent, "b");
-  clean(root);
+test("pruneWorkflowSkillOrphans removes skill-router-owned run-workflow installs only", () => {
+  const skillsHome = tmp(); const claudeHome = tmp();
+  w(skillsHome, "run-workflow/SKILL.md", ownedRunWorkflowSkill("skill-router"));
+  w(skillsHome, "run-workflow/workflows.json", "{}");
+  w(claudeHome, "skills/run-workflow/SKILL.md", ownedRunWorkflowSkill("skill-router"));
+  const r = gen.pruneWorkflowSkillOrphans({ skillsHome, claudeHome });
+  eq(r.removed.sort().join(), "claude,pi");
+  eq(fs.existsSync(path.join(skillsHome, "run-workflow")), false);
+  eq(fs.existsSync(path.join(claudeHome, "skills/run-workflow")), false);
+  // skill-workflows-owned installs (its header) are never touched
+  w(skillsHome, "run-workflow/SKILL.md", ownedRunWorkflowSkill("skill-workflows"));
+  w(claudeHome, "skills/run-workflow/SKILL.md", ownedRunWorkflowSkill("skill-workflows"));
+  const r2 = gen.pruneWorkflowSkillOrphans({ skillsHome, claudeHome });
+  eq(r2.removed.length, 0);
+  eq(fs.existsSync(path.join(skillsHome, "run-workflow/SKILL.md")), true);
+  eq(fs.existsSync(path.join(claudeHome, "skills/run-workflow/SKILL.md")), true);
+  // a user-authored run-workflow is never touched
+  w(skillsHome, "run-workflow/SKILL.md", "---\nname: run-workflow\n---\nmy own skill\n");
+  const r3 = gen.pruneWorkflowSkillOrphans({ skillsHome, claudeHome });
+  eq(r3.removed.length, 0);
+  eq(fs.readFileSync(path.join(skillsHome, "run-workflow/SKILL.md"), "utf8"), "---\nname: run-workflow\n---\nmy own skill\n");
+  // absent installs are a no-op
+  const empty = tmp();
+  eq(gen.pruneWorkflowSkillOrphans({ skillsHome: empty, claudeHome: empty }).removed.length, 0);
+  clean(skillsHome); clean(claudeHome); clean(empty);
 });
 
-test("loadWorkflows rejects unknown agent names", () => {
-  const root = wfRoot([
-    { name: "a", url: "https://x/a", description: "d", persona: "p" } ]);
-  w(root, "workflows.json", JSON.stringify({ workflows: [
-    { name: "review", description: "Two-pass review",
-      steps: [ { agent: "zzz", task: "Review the code", output: "docs/review-a.md" } ] } ] }));
-  assert.throws(() => wf.loadWorkflows(root), /review/);
-  assert.throws(() => wf.loadWorkflows(root), /zzz/);
-  clean(root);
-});
-
-test("loadWorkflows rejects empty steps, missing fields, bad names", () => {
-  const repos = [ { name: "a", url: "https://x/a", description: "d", persona: "p" } ];
-  {
-    const root = wfRoot(repos);
-    w(root, "workflows.json", JSON.stringify({ workflows: [
-      { name: "review", description: "Two-pass review", steps: [] } ] }));
-    assert.throws(() => wf.loadWorkflows(root), /review/);
-    clean(root);
-  }
-  {
-    const root = wfRoot(repos);
-    w(root, "workflows.json", JSON.stringify({ workflows: [
-      { name: "review", description: "Two-pass review",
-        steps: [ { agent: "a", task: "Review the code" } ] } ] }));
-    assert.throws(() => wf.loadWorkflows(root), /review/);
-    clean(root);
-  }
-  {
-    const root = wfRoot(repos);
-    w(root, "workflows.json", JSON.stringify({ workflows: [
-      { name: "Bad_Name", description: "Two-pass review",
-        steps: [ { agent: "a", task: "Review the code", output: "docs/out.md" } ] } ] }));
-    assert.throws(() => wf.loadWorkflows(root), /Bad_Name/);
-    clean(root);
-  }
-});
-
-test("loadWorkflows rejects duplicate workflow names", () => {
-  const root = wfRoot([
-    { name: "a", url: "https://x/a", description: "d", persona: "p" } ]);
-  const entry = {
-    name: "review", description: "Two-pass review",
-    steps: [ { agent: "a", task: "Review the code", output: "docs/out.md" } ] };
-  w(root, "workflows.json", JSON.stringify({ workflows: [entry, entry] }));
-  assert.throws(() => wf.loadWorkflows(root), /review/);
-  assert.throws(() => wf.loadWorkflows(root), /duplicate/);
-  clean(root);
-});
-
-test("loadWorkflows rejects escaping output paths", () => {
-  const repos = [ { name: "a", url: "https://x/a", description: "d", persona: "p" } ];
-  for (const output of ["../outside.md", "/abs.md", "..\\outside.md"]) {
-    const root = wfRoot(repos);
-    w(root, "workflows.json", JSON.stringify({ workflows: [
-      { name: "review", description: "Two-pass review",
-        steps: [ { agent: "a", task: "Review the code", output } ] } ] }));
-    assert.throws(() => wf.loadWorkflows(root), /review/, `output: ${output}`);
-    clean(root);
-  }
-});
-
-test("loadWorkflows rejects duplicate output paths within a workflow", () => {
-  const root = wfRoot([
-    { name: "a", url: "https://x/a", description: "d", persona: "p" },
-    { name: "b", url: "https://x/b", description: "d", persona: "p" } ]);
-  w(root, "workflows.json", JSON.stringify({ workflows: [
-    { name: "review", description: "Two-pass review",
-      steps: [
-        { agent: "a", task: "Review the code", output: "docs/out.md" },
-        { agent: "b", task: "Audit the review", output: "docs/out.md" } ] } ] }));
-  assert.throws(() => wf.loadWorkflows(root), /review/);
-  assert.throws(() => wf.loadWorkflows(root), /docs\/out\.md/);
-  clean(root);
+test("runFlow prunes an orphaned skill-router run-workflow install", () => {
+  const f = claudeFixture({});
+  const pi = path.join(f.root, "pi-skills");
+  w(pi, "run-workflow/SKILL.md", ownedRunWorkflowSkill("skill-router"));
+  const r = gen.runInstall(f.root, { settingsPath: f.sp, vibeConfigPath: f.vp, skillsHome: pi, claudeHome: f.claude });
+  eq(r.exitCode, 0);
+  eq(fs.existsSync(path.join(pi, "run-workflow")), false);
+  eq(r.report.some(x => /run-workflow/.test(x) && /skill-workflows/.test(x)), true);
+  clean(f.root); clean(f.claude);
 });
 
 process.exitCode = await (async () => {
