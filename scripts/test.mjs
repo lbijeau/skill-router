@@ -1589,6 +1589,49 @@ test("syncGlobalSkills: copies byte-identical, idempotent, skips non-skills", ()
   clean(root); clean(skillsHome);
 });
 
+test("syncGlobalSkills installs run-workflow alongside route-skill", () => {
+  const root = tmp();
+  w(root, "global-skills/route-skill/SKILL.md", "---\nname: route-skill\ndescription: d\n---\nbody\n");
+  w(root, "global-skills/run-workflow/SKILL.md", "---\nname: run-workflow\ndescription: d\n---\nbody\n");
+  const home = path.join(root, "skills-home");
+  const { written } = gen.syncGlobalSkills(root, home);
+  eq(written.filter(f => f.includes("run-workflow")).length, 1);
+  clean(root);
+});
+
+test("syncGlobalSkills copies the repo-root workflows.json into the installed run-workflow dir", () => {
+  const root = tmp(); const skillsHome = tmp();
+  const manifest = JSON.stringify({ workflows: [] });
+  w(root, "global-skills/run-workflow/SKILL.md", "---\nname: run-workflow\ndescription: d\n---\nbody\n");
+  w(root, "workflows.json", manifest);
+  gen.syncGlobalSkills(root, skillsHome);
+  eq(fs.readFileSync(path.join(skillsHome, "run-workflow", "workflows.json"), "utf8"), manifest);
+  clean(root); clean(skillsHome);
+});
+
+test("syncGlobalSkills skips the manifest copy silently when workflows.json is absent", () => {
+  const root = tmp(); const skillsHome = tmp();
+  w(root, "global-skills/run-workflow/SKILL.md", "---\nname: run-workflow\ndescription: d\n---\nbody\n");
+  const r = gen.syncGlobalSkills(root, skillsHome);
+  eq(r.written.length, 1);
+  eq(fs.existsSync(path.join(skillsHome, "run-workflow", "workflows.json")), false);
+  clean(root); clean(skillsHome);
+});
+
+test("pi run-workflow SKILL.md names the manifest, dispatch loop, and checkpoint rule", () => {
+  const body = fs.readFileSync(path.join(gen.REPO_ROOT, "global-skills/run-workflow/SKILL.md"), "utf8");
+  assert(/workflows\.json/.test(body));
+  assert(/subagent/.test(body));
+  assert(/checkpoint/i.test(body));
+});
+
+test("claude run-workflow SKILL.md names the manifest, Task tool, and checkpoint rule", () => {
+  const body = fs.readFileSync(path.join(gen.REPO_ROOT, "global-skills-claude/run-workflow/SKILL.md"), "utf8");
+  assert(/workflows\.json/.test(body));
+  assert(/Task/.test(body));
+  assert(/checkpoint/i.test(body));
+});
+
 test("renderRouterAgent: frontmatter shape and persona body", () => {
   const home = "/fake/home";
   const out = gen.renderRouterAgent({ root: "/fake/home/sr", home });
@@ -2462,6 +2505,19 @@ test("syncClaudeSkills: writes route-skill; refuses unmarked file and symlinked 
   const r3 = gen.syncClaudeSkills(root, home);
   eq(r3.refused.join(), "route-skill");
   eq(fs.lstatSync(path.join(home, "route-skill/SKILL.md")).isSymbolicLink(), true);
+  clean(root); clean(path.dirname(home));
+});
+
+test("syncClaudeSkills installs run-workflow alongside route-skill", () => {
+  const root = tmp(); const home = path.join(tmp(), "skills");
+  const src = fs.readFileSync(path.join(gen.REPO_ROOT, "global-skills-claude/route-skill/SKILL.md"), "utf8");
+  w(root, "global-skills-claude/route-skill/SKILL.md", src);
+  w(root, "global-skills-claude/run-workflow/SKILL.md", "---\nname: run-workflow\ndescription: d\n---\nbody\n");
+  const manifest = JSON.stringify({ workflows: [] });
+  w(root, "workflows.json", manifest);
+  const r = gen.syncClaudeSkills(root, home);
+  eq(r.written.includes("run-workflow"), true);
+  eq(fs.readFileSync(path.join(home, "run-workflow", "workflows.json"), "utf8"), manifest);
   clean(root); clean(path.dirname(home));
 });
 

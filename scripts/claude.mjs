@@ -458,6 +458,17 @@ export function syncClaudeSkills(root, skillsHome) {
     atomicWrite(path.join(dir, "SKILL.md"), src.content);
     written.push(src.name);
   }
+  // The run-workflow skill reads the manifest that sits next to its own
+  // SKILL.md: copy the repo-root workflows.json into the installed dir —
+  // but only when the run-workflow skill itself is ours (not refused).
+  // Absent manifest = nothing to copy; install must not break.
+  const manifest = path.join(root, "workflows.json");
+  const runWorkflow = claudeSkillSources(root).find(s => s.name === "run-workflow");
+  if (runWorkflow && !refused.includes("run-workflow") && fs.existsSync(manifest)) {
+    const dir = path.join(skillsHome, "run-workflow");
+    fs.mkdirSync(dir, { recursive: true });
+    atomicWrite(path.join(dir, "workflows.json"), fs.readFileSync(manifest, "utf8"));
+  }
   return { written, refused, dirCreated: !existed && fs.existsSync(skillsHome) };
 }
 

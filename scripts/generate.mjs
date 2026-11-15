@@ -266,6 +266,15 @@ export function syncGlobalSkills(root, skillsHome) {
     fs.writeFileSync(dest, fs.readFileSync(src));
     written.push(dest);
   }
+  // The run-workflow skill reads the manifest that sits next to its own
+  // SKILL.md: copy the repo-root workflows.json into the installed dir.
+  // Absent manifest = nothing to copy; install must not break.
+  const manifest = path.join(root, "workflows.json");
+  if (fs.existsSync(manifest) && fs.existsSync(path.join(srcDir, "run-workflow", "SKILL.md"))) {
+    const destManifest = path.join(home, "run-workflow", "workflows.json");
+    fs.mkdirSync(path.dirname(destManifest), { recursive: true });
+    fs.writeFileSync(destManifest, fs.readFileSync(manifest));
+  }
   return { written, skipped };
 }
 
