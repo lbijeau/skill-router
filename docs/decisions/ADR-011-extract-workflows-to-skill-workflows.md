@@ -31,9 +31,12 @@ The workflow module moves to a new repository, **skill-workflows**:
 - skill-workflows adds an **agent registry** (`agents.json`): the
   agent-agnostic interface ADR-009 anticipated. An entry is a name plus
   per-harness presence (pi agent path, Claude agent path, Vibe TOML
-  path, each optional). Steps reference agents by registry name;
-  runners dispatch by name on each harness and use registry paths for
-  install-time existence checks and docs.
+  path, each optional). Steps reference agents by registry name and
+  runners dispatch by name on each harness. Registry paths are
+  **provenance documentation, not user-side verification**: agent-roster
+  agents are hand-copied into projects, so a path existing on disk
+  proves the maintainer's clone, not the user's install. A missing path
+  is a status line, never an error.
 - The workflow spec stays minimal — `(agent, task, output)` per step —
   unchanged from ADR-009. agent-roster's richer stage discipline (typed
   knowledge artifacts, review gates) lives in task text in v1; the
@@ -47,6 +50,25 @@ The workflow module moves to a new repository, **skill-workflows**:
 
 ## Consequences
 
+- **The Vibe mode TOML is a cross-repo write, governed by contract.**
+  skill-workflows writes `workflow-orchestrator.toml` into
+  skill-router's `agents-vibe/` (the only `agent_paths` entry the
+  user's Vibe config has), with its own marker. The contract, stated
+  in both READMEs: skill-router's prune **skips foreign markers**
+  (tested); skill-workflows owns removing its TOML on update and
+  uninstall; a missing skill-router checkout is a clear
+  skip-with-message, never a silent failure or hard error. The known
+  cost, accepted: skill-router's working tree shows the foreign file
+  while skill-workflows is installed.
+- The registry is a **hand-maintained contract** with foreign repos —
+  names duplicate agent-roster's frontmatter with no sync mechanism; a
+  rename there breaks at dispatch (stop-and-report), not at install.
+  A drift check is a follow-up, not v1.
+- skill-router's de-extraction **prunes the runners it still owns one
+  last time** (they carry its marker), so users who update skill-router
+  but never install skill-workflows do not keep a stale `run-workflow`
+  skill forever. The README pointer explains that skill-workflows
+  re-ships them.
 - Two installs where there was one: skill-router for agents, then
   skill-workflows for workflows. Both installers are idempotent and
   independent.

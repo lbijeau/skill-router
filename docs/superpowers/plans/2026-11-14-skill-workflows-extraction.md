@@ -22,7 +22,10 @@
 
 ## Review Focus
 
-- Registry/workflow cross-validation: a step naming an agent registered for zero harnesses is valid at generation but fails everywhere at dispatch — accept (stop-and-report covers it), but the README says so.
+- Registry/workflow cross-validation: a step naming an agent registered for zero harnesses is valid at generation but fails everywhere at dispatch — accept (stop-and-report covers it), but the README says so. Registry paths are provenance docs, not user-side verification (agent-roster agents are hand-copied into projects); a missing path is a status line, never an error.
+- The cross-repo Vibe write: skill-router's prune must skip foreign markers (tested in Task 5); skill-workflows owns removing its TOML on update/uninstall; a missing skill-router checkout is skip-with-message.
+- Orphaned runners: skill-router's de-extraction prunes the installed run-workflow skills it still owns (marker check) one last time.
+- Registry drift: agents.json names duplicate agent-roster's frontmatter with no sync — hand-maintained contract, breakage surfaces at dispatch; the README says so.
 - Port fidelity: the validator's rejection classes (unknown agent, empty steps, missing fields, bad names, dup names, escaping/dup outputs) must all survive the port — diff against skill-router's test list during review.
 - skill-router de-extraction must remove the runners, the mode generation, and the workflows wiring without breaking install/update/status for users who never had workflows (the absent-manifest path was the default a week ago).
 - Users with the old skill-router-installed `run-workflow` skills: skill-workflows' installer overwrites them (same paths, same names) — no stale double-install.
@@ -75,9 +78,9 @@
 **Files:**
 - Create: `install.sh` (Node ≥ 18 check + `node scripts/install.mjs`), `scripts/install.mjs` — CLI: `install` (sync skills to `~/.pi/agent/skills` + `~/.claude/skills`, write the Vibe mode into **skill-router's** `agents-vibe/` — ruling below), `update`, `status` (workflows count, registry count, runner presence)
 - Modify: `README.md` (full docs: what/why, quickstart, the registry format, the three runners, lockstep duty restated as this repo's ADR-001 content, the zero-harness-agent caveat)
-- Create: `docs/decisions/ADR-001-three-runner-lockstep.md` (the contract, restated from ADR-009/010)
+- Create: `docs/decisions/ADR-001-three-runner-lockstep.md` (the contract restated from ADR-009/010, INCLUDING ADR-010's known divergence: pi/Claude read the manifest at runtime, the Vibe mode is baked at generation — a workflow edit between installs drifts; status surfaces it)
 
-**Ruling baked in:** the Vibe mode TOML lands in skill-router's `agents-vibe/` directory (the only `agent_paths` entry the user's Vibe config has). skill-workflows writes it there with its own marker; skill-router's `writeVibeOrchestrator` is being removed in Task 6, so there is no clobber. If skill-router ever regenerates a mode at that path, last-writer-wins with distinct markers — the README documents that skill-workflows owns the path while installed.
+**Ruling baked in (council-amended):** the Vibe mode TOML lands in skill-router's `agents-vibe/` directory (the only `agent_paths` entry the user's Vibe config has), written with skill-workflows' own marker. The cross-repo contract, stated in BOTH READMEs: skill-router's prune skips foreign markers (Task 5 adds the test); skill-workflows' `update`/`uninstall` removes its TOML (owned by marker); a missing skill-router checkout is a clear skip-with-message, never a hard error. Accepted cost: skill-router's working tree shows the foreign file while skill-workflows is installed. The Vibe step also skips with a message when skill-router's dir is absent — no dependency inversion failure.
 
 - [ ] **Step 1: Failing tests** for install.mjs's flow (tmp-root fixture pattern).
 - [ ] **Step 2: RED → Step 3: implement → Step 4: GREEN.**
@@ -88,7 +91,9 @@
 
 **Files (skill-router repo):**
 - Remove: `global-skills/run-workflow/`, `global-skills-claude/run-workflow/`, `scripts/workflows.mjs`, the `writeVibeOrchestrator`/`renderVibeOrchestratorTOML` wiring and their tests, the `workflows.json` status wiring (statusOf field, printStatus line), repo-root `workflows.json`
-- Modify: `README.md` (Workflows section → pointer: workflows now live in skill-workflows; one paragraph), `docs/decisions/ADR-009` (closing note: trigger fired via ADR-011; module extracted; seam held)
+- Modify: `README.md` (Workflows section → pointer: workflows now live in skill-workflows; one paragraph, including: users who never install skill-workflows should delete the old installed run-workflow skills — the de-extraction prunes them once), `docs/decisions/ADR-009` (closing note: trigger fired via ADR-011; module extracted; seam held)
+- **Prune-skip-foreign-marker (council amendment):** skill-router's `agents-vibe/` stale-prune must skip a file carrying a foreign marker — add the test here (fixture: a workflow-orchestrator.toml with skill-workflows' marker survives a full install/update).
+- **Orphan prune (council amendment):** the de-extraction prunes the installed `run-workflow` skills skill-router still owns (they carry skill-router's marker) — one last `syncGlobalSkills`-family pass that removes them; test with a fixture home.
 - Keep: everything else; the suite must stay green with the workflows tests removed.
 
 - [ ] **Step 1: Remove the module + tests; run the suite** — GREEN.
@@ -100,9 +105,9 @@
 
 **Files (skill-workflows repo):**
 - Modify: `agents.json` — add the six agent-roster stage agents (`triage-issues`, `requirements`, `sprint-planning`, `test-authorship`, `code-generation`, `investigate`) with `pi` and `claude` paths into agent-roster's `.pi/agents/` and `.claude/agents/` (tilde-anchored), no `vibe`
-- Modify: `workflows.json` — add `feature-line`, the SDLC workflow: triage → requirements → sprint-planning, outputs under `knowledge/` per agent-roster's stage contract (task text carries the file-shape discipline; the spec stays minimal)
+- Modify: `workflows.json` — add `feature-line`, the SDLC workflow: **requirements → sprint-planning** (council amendment: agent-roster's own contract says requirements consumes a brainstorm outcome, NOT triage's bd-queue output — triage is standalone or omitted; do not chain it). Outputs under `knowledge/` per agent-roster's stage contract (task text carries the file-shape discipline; the spec stays minimal). The per-ticket test-authorship/code-generation loop is deliberately out of scope for a linear spec — say so in the README so nobody later "fixes" it by bloating the spec.
 
 - [ ] **Step 1: Failing tests** — the new workflow validates; its agents exist in the registry; the generated Vibe mode and skill copies include it (run the suite).
 - [ ] **Step 2: RED → Step 3: add entries → Step 4: GREEN.**
-- [ ] **Step 5: Real install + smoke** — reinstall; confirm the pi skill dir's workflows.json lists `feature-line`; dispatch one step live in a scratch project (triage on a dummy issue list) to prove cross-repo dispatch works.
+- [ ] **Step 5: Real install + smoke** — reinstall; confirm the pi skill dir's workflows.json lists `feature-line`; dispatch one step live in a scratch project (requirements on a dummy brainstorm outcome, with the agent-roster agents copied into that project per its install model) to prove cross-repo dispatch works — the under-specified part the council named: verify the agents are actually present in the dispatch project, since that is the real failure mode.
 - [ ] **Step 6: Commit.**
