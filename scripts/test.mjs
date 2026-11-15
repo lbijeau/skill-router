@@ -376,7 +376,7 @@ test("renderVibeOrchestratorTOML emits a mode TOML with baked workflows", () => 
   const weird = gen.renderVibeOrchestratorTOML([
     { name: "w", description: 'say "hi"', steps: [
       { agent: "a", task: 'write "quoted" text', output: "docs/o.md" } ] }]);
-  assert(weird.includes('\\"quoted\\"') || !weird.includes('"""')); // escaped or at least unbroken
+  assert(weird.includes('\\"quoted\\"')); // quotes escaped — no masked regression behind a disjunction
 });
 
 test("writeVibeOrchestrator writes the mode for a valid manifest, removes it when the manifest goes bad", () => {
