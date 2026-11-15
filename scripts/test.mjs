@@ -3334,6 +3334,22 @@ test("runFlow prunes an orphaned skill-router run-workflow install", () => {
   clean(f.root); clean(f.claude);
 });
 
+test("ADRs: numbers are unique, gapless, and the H1 matches the filename", () => {
+  // Two parallel sessions once created two different ADR-009s in one day.
+  // This makes that class of collision a test failure instead of a rename.
+  const dir = path.join(gen.REPO_ROOT, "docs", "decisions");
+  const files = fs.readdirSync(dir).filter(f => /^ADR-\d{3}.*\.md$/.test(f)).sort();
+  eq(files.length > 0, true);
+  const nums = files.map(f => Number(f.match(/^ADR-(\d{3})/)[1]));
+  eq(new Set(nums).size, nums.length, "duplicate ADR number in docs/decisions");
+  eq(nums.every((n, i) => n === i + 1), true, `ADR numbers must be 1..N gapless (found ${nums.join(",")})`);
+  for (const f of files) {
+    const n = f.match(/^ADR-(\d{3})/)[1];
+    const h1 = fs.readFileSync(path.join(dir, f), "utf8").match(/^# (ADR-\d+)/m);
+    eq(h1 && h1[1], `ADR-${n}`, `${f}: H1 must match the filename's ADR number`);
+  }
+});
+
 process.exitCode = await (async () => {
   let failed = 0;
   try {
