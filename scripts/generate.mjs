@@ -252,6 +252,28 @@ export function renderVibeOrchestratorTOML(workflows) {
   ].join("\n");
 }
 
+export const VIBE_ORCHESTRATOR_NAME = "workflow-orchestrator";
+
+// Writes the generated workflow-orchestrator mode when the manifest is valid
+// and non-empty; prunes the previously generated file when it goes stale.
+// A file without the generated marker is user-authored and is never touched.
+export function writeVibeOrchestrator(root, wfState) {
+  const file = path.join(root, "agents-vibe", `${VIBE_ORCHESTRATOR_NAME}.toml`);
+  if (wfState?.valid && wfState.workflows.length > 0) {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    atomicWrite(file, renderVibeOrchestratorTOML(wfState.workflows));
+    return { written: true, removed: false };
+  }
+  if (fs.existsSync(file)) {
+    const head = fs.readFileSync(file, "utf8").split("\n", 5).join("\n");
+    if (head.includes(GENERATED_MARKER)) {
+      fs.rmSync(file);
+      return { written: false, removed: true };
+    }
+  }
+  return { written: false, removed: false };
+}
+
 export function writeAgentFiles(root, manifest, skip = new Set()) {
   const agentsDir = path.join(root, "agents");
   fs.mkdirSync(agentsDir, { recursive: true });
@@ -1034,6 +1056,8 @@ function runFlow(root, mode, { settingsPath, vibeConfigPath, skillsHome, claudeH
   report.push(`router agent: ${ROUTER_AGENT_NAME} written to agents/${ROUTER_AGENT_NAME}.md`);
   writeVibeRouterAgent(root, anchor);
   report.push(`vibe router agent: ${ROUTER_AGENT_NAME} written to agents-vibe/${ROUTER_AGENT_NAME}.toml`);
+  const orchResult = writeVibeOrchestrator(root, wfState);
+  report.push(`vibe orchestrator mode: ${orchResult.written ? "written" : orchResult.removed ? "removed" : "skipped"}`);
   writeClaudeRouterAgent(root, anchor);
   report.push(`claude router agent: ${ROUTER_AGENT_NAME} written to agents-claude/${ROUTER_AGENT_NAME}.md`);
   const synced = syncGlobalSkills(root, skillsHome, wfState);

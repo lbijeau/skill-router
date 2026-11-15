@@ -379,6 +379,45 @@ test("renderVibeOrchestratorTOML emits a mode TOML with baked workflows", () => 
   assert(weird.includes('\\"quoted\\"') || !weird.includes('"""')); // escaped or at least unbroken
 });
 
+test("writeVibeOrchestrator writes the mode for a valid manifest, removes it when the manifest goes bad", () => {
+  const root = tmp();
+  w(root, "repos.json", JSON.stringify({ repos: [
+    { name: "one", url: "https://github.com/x/y", description: "d", persona: "p" }] }));
+  w(root, "workflows.json", JSON.stringify({ workflows: [
+    { name: "design-review", description: "two-step review", steps: [
+      { agent: "one", task: "write the design", output: "docs/design.md" } ] } ] }));
+  const orch = path.join(root, "agents-vibe", "workflow-orchestrator.toml");
+  const r1 = gen.writeVibeOrchestrator(root, wf.manifestState(root));
+  eq(r1.written, true);
+  eq(r1.removed, false);
+  const toml = fs.readFileSync(orch, "utf8");
+  eq(toml.includes("design-review"), true);
+  // malformed workflows.json → the generated file is pruned
+  w(root, "workflows.json", "{ not json !!!");
+  const r2 = gen.writeVibeOrchestrator(root, wf.manifestState(root));
+  eq(r2.written, false);
+  eq(r2.removed, true);
+  eq(fs.existsSync(orch), false);
+  // absent workflows.json → still gone, no error
+  fs.rmSync(path.join(root, "workflows.json"), { force: true });
+  const r3 = gen.writeVibeOrchestrator(root, wf.manifestState(root));
+  eq(r3.written, false);
+  eq(r3.removed, false);
+  eq(fs.existsSync(orch), false);
+  clean(root);
+});
+
+test("writeVibeOrchestrator never removes a user-authored file", () => {
+  const root = tmp();
+  const orch = path.join(root, "agents-vibe", "workflow-orchestrator.toml");
+  w(root, "agents-vibe/workflow-orchestrator.toml", "hand-written, no marker\n");
+  const r = gen.writeVibeOrchestrator(root, wf.manifestState(root)); // no workflows.json
+  eq(r.written, false);
+  eq(r.removed, false);
+  eq(fs.readFileSync(orch, "utf8"), "hand-written, no marker\n");
+  clean(root);
+});
+
 test("writeVibeAgentFiles: writes, idempotent, removes zero-skill leftovers", () => {
   const root = tmp();
   w(root, "repos.json", JSON.stringify({ repos: [
