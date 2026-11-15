@@ -143,7 +143,12 @@ Workflows no longer live here: the module was extracted to the
 install that repo for the `run-workflow` skills (pi and Claude Code) and the
 Vibe `workflow-orchestrator` mode. Users who never install skill-workflows
 should delete the old installed `run-workflow` skills — and the first
-post-extraction `install`/`update` of skill-router does exactly that,
+post-extraction `install`/`update` of skill-router does exactly that.
+While skill-workflows is installed, its installer writes the Vibe
+`workflow-orchestrator.toml` into this repo's `agents-vibe/` with its own
+marker: skill-router's prune never touches a foreign-marked file, and
+removing the skill-workflows checkout orphans that TOML — delete it
+manually. The first
 pruning them once (only the copies carrying skill-router's marker;
 skill-workflows-owned installs are never touched).
 

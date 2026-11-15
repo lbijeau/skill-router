@@ -65,6 +65,8 @@ manifest). The mode:
 - needs no `config.toml` change: `agent_paths` already loads
   `agents-vibe/` (ADR-004 respected by omission).
 
+(The lockstep duty now lives in
+skill-workflows' ADR-001, after the ADR-011 extraction.)
 **Lockstep duty:** the three runners (pi skill, Claude Code skill, Vibe
 mode) implement one contract — dispatch in order, verify output,
 checkpoint between steps, resume by skipping completed outputs. A change
