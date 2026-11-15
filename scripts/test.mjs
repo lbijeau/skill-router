@@ -358,6 +358,27 @@ test("renderVibeAgentTOML: rows outside home stay absolute", () => {
   eq(out.includes("- a — /opt/elsewhere/skills/x/a/SKILL.md"), true);
 });
 
+test("renderVibeOrchestratorTOML emits a mode TOML with baked workflows", () => {
+  const toml = gen.renderVibeOrchestratorTOML([
+    { name: "design-review", description: "d", steps: [
+      { agent: "superpowers", task: "Brainstorm the feature", output: "docs/design.md" },
+      { agent: "ponytail", task: "Critique it", output: "docs/design-review.md" } ] },
+  ]);
+  assert(/agent_type = "agent"/.test(toml));
+  assert(/disabled_tools = \["skill"\]/.test(toml));
+  assert(/ask_user_question/.test(toml) && /task/.test(toml) && /write_file/.test(toml));
+  assert(toml.includes("design-review"));
+  assert(toml.includes("Brainstorm the feature"));   // task text baked, escaped
+  assert(toml.includes("docs/design.md"));
+  assert(/checkpoint/i.test(toml));                   // ADR-009 contract in prose
+  assert(/already exists and is non-empty/.test(toml)); // resume rule
+  // every workflow and step appears; no bare """ breakage from quotes in task text
+  const weird = gen.renderVibeOrchestratorTOML([
+    { name: "w", description: 'say "hi"', steps: [
+      { agent: "a", task: 'write "quoted" text', output: "docs/o.md" } ] }]);
+  assert(weird.includes('\\"quoted\\"') || !weird.includes('"""')); // escaped or at least unbroken
+});
+
 test("writeVibeAgentFiles: writes, idempotent, removes zero-skill leftovers", () => {
   const root = tmp();
   w(root, "repos.json", JSON.stringify({ repos: [
