@@ -21,12 +21,16 @@ verdict, artifacts in the session's workflow outputs) established:
 - Anything with `agent_type = "agent"` is a **mode**: user-selectable
   (`--agent NAME`, Shift+Tab), runs at the root, and is exactly the thing
   that can call `agents.spawn`.
-- A live probe (2026-11-14, mistral-vibe 3.0.3) confirmed the decisive
-  inference: a mode TOML received a working spawn tool and successfully
-  spawned the `ponytail` subagent. The probe's other two negatives were
-  headless-mode artifacts: `write_file` is denied by the headless approval
-  callback (interactive sessions prompt), and `ask_user_question` exists
-  as the UI-layer `ui.ask_user_question`, absent in `-p` mode by design.
+- A live probe (2026-11-14, mistral-vibe 3.0.3, headless) confirmed the
+  decisive inference — and only that one: a mode TOML received a working
+  spawn tool and successfully spawned the `ponytail` subagent. The probe's
+  other two items were *disconfirmed headless* and resolved by artifact
+  analysis, not live re-test: `write_file` is denied by the headless
+  approval callback (interactive sessions prompt instead), and
+  `ask_user_question` exists as the UI-layer `ui.ask_user_question`,
+  absent in `-p` mode by design. Interactive-mode checkpointing and the
+  write-relay loop therefore remain inference until an interactive smoke
+  test exercises them on first real use.
 - Probe correction: the `AgentType` enum values are `agent` and
   `subagent` (`vibe/agents.py`); a mode is `agent_type = "agent"`, not
   `"mode"`.
@@ -38,10 +42,11 @@ skill-router generates `agents-vibe/workflow-orchestrator.toml` — a mode
 and removed when it does not (the same prune philosophy as the installed
 manifest). The mode:
 
-- keeps `disabled_tools = ["skill"]` and reads nothing at runtime that is
-  not baked into its instructions — the workflow list (names, step
-  agents, tasks, outputs) is **baked in at generation time**, the same
-  established pattern as per-repo skill rows.
+- keeps `disabled_tools = ["skill"]` and reads no manifest at runtime —
+  the workflow list (names, step agents, tasks, outputs) is **baked in
+  at generation time**, the same established pattern as per-repo skill
+  rows. (It does read step output files at runtime, to enforce the resume
+  rule's exists-and-non-empty check.)
 - dispatches each step's agent via the spawn tool with the step's task
   text, waits for the reply, and **writes the output file itself** from
   the subagent's returned text. Step agents keep their ADR-006 read-only
@@ -57,11 +62,34 @@ manifest). The mode:
 **Lockstep duty:** the three runners (pi skill, Claude Code skill, Vibe
 mode) implement one contract — dispatch in order, verify output,
 checkpoint between steps, resume by skipping completed outputs. A change
-to any runner's behavior is a change to all three; reviews must check
-them together.
+to any runner's behavior is a change to all three, landed as one commit
+covering all three runner artifacts plus the README; reviews must check
+them together. **Known divergence:** the pi/Claude runners read
+`workflows.json` at runtime, the Vibe mode is baked at generation — a
+workflow edit between installs means Vibe runs the old contract until
+the next install/update. Accepted as a drift window, stated here rather
+than papered over.
 
 ## Consequences
 
+- **Trust surface and residual risk.** The orchestrator runs as the root
+  session with `write_file` and no path allowlist — more tool surface than
+  any other generated agent. This is justified because its prompt is
+  skill-router-authored, which is precisely what ADR-006's clean room does
+  *not* defend against (its concern is upstream SKILL.md bodies as an
+  instruction channel). The residual risk to name: step-agent replies are
+  text derived from third-party skill content, so a malicious reply could
+  steer a root-level writer (a prompt-injection channel). Contained by
+  interactive write approvals and the step agents' mediated scaffolds,
+  but real — accepted knowingly.
+- The mode may name an agent whose `agents-vibe/<name>.toml` was pruned
+  (repo removed since generation); dispatch then fails at runtime. The
+  validator only guarantees names are in `repos.json` at generation time.
+  Accepted: the mode's instructions say stop-and-report on spawn failure.
+- Modes and subagents share the `agents-vibe/` directory via `agent_paths`;
+  whether a mode can appear in a spawned agent's subagent menu is
+  unverified (likely benign — one line to check on first interactive
+  smoke test).
 - Vibe users select the mode explicitly (`--agent workflow-orchestrator`)
   — the same explicit-invocation UX as the skills, not a loss.
 - Writes by the orchestrator prompt for approval in interactive
@@ -71,6 +99,8 @@ them together.
 - The mode is regenerated on install/update, so workflow edits flow
   with the existing update path; no runtime manifest discovery exists to
   go stale.
-- Version fragility: the spawn tool name, depth-one cap, and UI tool
-  spelling are Unified Harness behaviours; re-probe after Vibe upgrades
+- Version fragility: the spawn tool name, depth-one cap, UI tool spelling,
+  and the `task` tool's config default (`allowlist = ["explore"]`, ASK
+  permission — observed not to bind the root at 3.0.3, but a fragile
+  default) are Unified Harness behaviours; re-probe after Vibe upgrades
   (the README already carries this warning).

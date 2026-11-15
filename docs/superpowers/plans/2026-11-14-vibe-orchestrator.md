@@ -14,7 +14,7 @@
 
 - No new npm dependencies; Node ≥ 18 built-ins only.
 - `agent_type = "agent"` (the enum has only `agent`/`subagent` — probed).
-- `disabled_tools = ["skill"]` always; the mode's tool set: read, write, spawn (`task`), and `ask_user_question` — exact spellings per ADR-010's probe.
+- `disabled_tools = ["skill"]` always; the mode's `enabled_tools` are exactly `read_file`, `write_file`, `task`, `ask_user_question` — the `task` spelling is the spawn tool per ADR-010's probe, and the `task` tool's config default (`allowlist = ["explore"]`, ASK permission) was observed not to bind the root at mistral-vibe 3.0.3; pin that finding in a comment beside the tool list.
 - Workflow list baked into instructions at generation time; no runtime read of `workflows.json`.
 - Absent or malformed `workflows.json` → the mode is not written; a stale `workflow-orchestrator.toml` is removed (prune philosophy).
 - No `config.toml` changes (ADR-004 respected by omission — `agent_paths` already loads `agents-vibe/`).
@@ -27,6 +27,7 @@
 - Bake correctness: every workflow in `workflows.json` appears in the instructions with name, description, each step's agent, task, and output.
 - Missing agent TOML: a workflow referencing an agent whose `agents-vibe/<name>.toml` was pruned (repo removed) — the mode still names it; dispatch fails at runtime. Accept (the validator already guarantees the name is in `repos.json`) and note it in the instructions ("if a spawn fails, stop and say so").
 - `runFlow` ordering: the mode is written after `writeVibeRouterAgent` and inside the same `wfState` validation pass — no extra manifest parse.
+- Interactive-mode checkpointing and the write-relay loop remain inference (probe was headless; see ADR-010's probe scoping) — the first real interactive run is the smoke test; nothing in this plan claims them as verified.
 
 ---
 
