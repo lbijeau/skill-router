@@ -140,5 +140,11 @@ node scripts/test.mjs   # offline, fixture-based; no network needed
   over `--dry-run`
 - [ADR-008](decisions/ADR-008-anchor-flag-for-committed-generation.md)
   — `--anchor` flag for committed-file generation
-- [ADR-009](decisions/ADR-009-vibe-router-and-harness-facts.md) — Vibe
+- [ADR-009](decisions/ADR-009-workflows-internal-seam.md) — workflows
+  as an internal seam with a named split trigger
+- [ADR-010](decisions/ADR-010-vibe-orchestrator-mode.md) — the Vibe
+  workflow runner as a generated mode TOML
+- [ADR-011](decisions/ADR-011-extract-workflows-to-skill-workflows.md) —
+  extract the workflows module to skill-workflows
+- [ADR-012](decisions/ADR-012-vibe-router-and-harness-facts.md) — Vibe
   router agent and the source-verified Vibe harness facts

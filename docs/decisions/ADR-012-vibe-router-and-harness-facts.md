@@ -1,4 +1,4 @@
-# ADR-009: Vibe router agent and the source-verified Vibe harness facts
+# ADR-012: Vibe router agent and the source-verified Vibe harness facts
 
 ## Status
 Accepted
