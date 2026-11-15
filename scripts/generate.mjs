@@ -6,7 +6,7 @@ import { pathToFileURL } from "node:url";
 import { NAME_RE, REPO_ROOT, ROUTER_AGENT_NAME, ROUTER_DESCRIPTION, STATE, atomicWrite, normalizeText, realPath, routerBodyLines, skillRows, tildePath, yamlQuote } from "./common.mjs";
 import { discoverSkills } from "./discover.mjs";
 import { claudeInstallStatus, claudeSkipReason, isOwnedClaudeAgent, pruneClaudeAgents, renderClaudeAgentFile, renderClaudeRouterAgent, resolveClaudeHome, runClaudeInstall, writeClaudeAgentFiles, writeClaudeRouterAgent } from "./claude.mjs";
-import { loadWorkflows } from "./workflows.mjs";
+import { loadWorkflows, manifestState } from "./workflows.mjs";
 
 export * from "./common.mjs";
 export * from "./discover.mjs";
@@ -251,7 +251,7 @@ export function writeVibeAgentFiles(root, manifest, skip = new Set(), home) {
 // Global skills live committed under global-skills/<name>/SKILL.md and are
 // synced (overwritten) into the pi skills home on every install/update: they
 // are generated-style boilerplate, and user edits do not survive updates.
-export function syncGlobalSkills(root, skillsHome) {
+export function syncGlobalSkills(root, skillsHome, wfState) {
   const home = skillsHome ?? path.join(os.homedir(), ".pi/agent/skills");
   const srcDir = path.join(root, "global-skills");
   const written = [];
@@ -269,14 +269,19 @@ export function syncGlobalSkills(root, skillsHome) {
   // The run-workflow skill reads the manifest that sits next to its own
   // SKILL.md: copy the repo-root workflows.json into the installed dir.
   // Absent manifest = nothing to copy; install must not break. A malformed
-  // manifest is also skipped (runFlow already prints that warning).
+  // manifest is also skipped (runFlow already prints that warning) — and a
+  // previously installed copy is pruned, so the skill never executes a
+  // manifest the repo no longer endorses.
+  const state = wfState ?? manifestState(root);
   const manifest = path.join(root, "workflows.json");
-  let manifestValid = false;
-  try { loadWorkflows(root); manifestValid = true; } catch {}
-  if (manifestValid && fs.existsSync(manifest) && fs.existsSync(path.join(srcDir, "run-workflow", "SKILL.md"))) {
+  if (fs.existsSync(path.join(srcDir, "run-workflow", "SKILL.md"))) {
     const destManifest = path.join(home, "run-workflow", "workflows.json");
-    fs.mkdirSync(path.dirname(destManifest), { recursive: true });
-    fs.writeFileSync(destManifest, fs.readFileSync(manifest));
+    if (state.valid && fs.existsSync(manifest)) {
+      fs.mkdirSync(path.dirname(destManifest), { recursive: true });
+      atomicWrite(destManifest, fs.readFileSync(manifest, "utf8"));
+    } else if (fs.existsSync(destManifest)) {
+      fs.rmSync(destManifest);
+    }
   }
   return { written, skipped };
 }
@@ -837,10 +842,9 @@ function runFlow(root, mode, { settingsPath, vibeConfigPath, skillsHome, claudeH
   const report = [];
   // A malformed workflows.json never fails install/update — it is a printed
   // warning and the flow continues (workflows are not installed yet anyway).
-  try {
-    loadWorkflows(root);
-  } catch (e) {
-    report.push(`workflows.json: skipped (${e.message})`);
+  const wfState = manifestState(root);
+  if (!wfState.valid) {
+    report.push(`workflows.json: skipped (${wfState.error})`);
   }
   let anyFailed = false;
   const oldSkillSets = new Map();
@@ -985,7 +989,7 @@ function runFlow(root, mode, { settingsPath, vibeConfigPath, skillsHome, claudeH
   report.push(`vibe router agent: ${ROUTER_AGENT_NAME} written to agents-vibe/${ROUTER_AGENT_NAME}.toml`);
   writeClaudeRouterAgent(root, anchor);
   report.push(`claude router agent: ${ROUTER_AGENT_NAME} written to agents-claude/${ROUTER_AGENT_NAME}.md`);
-  const synced = syncGlobalSkills(root, skillsHome);
+  const synced = syncGlobalSkills(root, skillsHome, wfState);
   for (const f of synced.written) {
     report.push(`global skill: ${path.basename(path.dirname(f))} synced to ${tildePath(f)}`);
   }

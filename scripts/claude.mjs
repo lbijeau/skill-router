@@ -3,7 +3,7 @@ import path from "node:path";
 import os from "node:os";
 import { NAME_RE, REPO_ROOT, ROUTER_AGENT_NAME, ROUTER_DESCRIPTION, STATE, atomicWrite, normalizeText, realPath, routerBodyLines, skillRows, yamlQuote } from "./common.mjs";
 import { discoverSkills } from "./discover.mjs";
-import { loadWorkflows } from "./workflows.mjs";
+import { manifestState } from "./workflows.mjs";
 
 // The legacy (pre-path) marker. A file ending in exactly this line predates
 // per-checkout scoping and is treated as this checkout's, per the migration
@@ -447,10 +447,11 @@ function skillDestStatus(skillsHome, src) {
   return cur === src.content ? "current" : "outdated";
 }
 
-export function syncClaudeSkills(root, skillsHome) {
+export function syncClaudeSkills(root, skillsHome, wfState) {
   const written = [], refused = [];
   const existed = fs.existsSync(skillsHome);
-  for (const src of claudeSkillSources(root)) {
+  const sources = claudeSkillSources(root);
+  for (const src of sources) {
     const st = skillDestStatus(skillsHome, src);
     if (st === "refused") { refused.push(src.name); continue; }
     if (st === "current") continue;
@@ -463,15 +464,21 @@ export function syncClaudeSkills(root, skillsHome) {
   // SKILL.md: copy the repo-root workflows.json into the installed dir —
   // but only when the run-workflow skill itself is ours (not refused).
   // Absent manifest = nothing to copy; install must not break. A malformed
-  // manifest is also skipped (runFlow already prints that warning).
+  // manifest is also skipped (runFlow already prints that warning) — and a
+  // previously installed copy is pruned, so the skill never executes a
+  // manifest the repo no longer endorses.
+  const state = wfState ?? manifestState(root);
   const manifest = path.join(root, "workflows.json");
-  let manifestValid = false;
-  try { loadWorkflows(root); manifestValid = true; } catch {}
-  const runWorkflow = claudeSkillSources(root).find(s => s.name === "run-workflow");
-  if (manifestValid && runWorkflow && !refused.includes("run-workflow") && fs.existsSync(manifest)) {
+  const runWorkflow = sources.find(s => s.name === "run-workflow");
+  if (runWorkflow && !refused.includes("run-workflow")) {
     const dir = path.join(skillsHome, "run-workflow");
-    fs.mkdirSync(dir, { recursive: true });
-    atomicWrite(path.join(dir, "workflows.json"), fs.readFileSync(manifest, "utf8"));
+    const destManifest = path.join(dir, "workflows.json");
+    if (state.valid && fs.existsSync(manifest)) {
+      fs.mkdirSync(dir, { recursive: true });
+      atomicWrite(destManifest, fs.readFileSync(manifest, "utf8"));
+    } else if (fs.existsSync(destManifest) && !isSymlink(dir)) {
+      fs.rmSync(destManifest);
+    }
   }
   return { written, refused, dirCreated: !existed && fs.existsSync(skillsHome) };
 }
@@ -481,10 +488,25 @@ export function syncClaudeSkills(root, skillsHome) {
 export function claudeSkillsStatus(root, skillsHome) {
   let stale = false;
   const refused = [];
-  for (const src of claudeSkillSources(root)) {
+  const sources = claudeSkillSources(root);
+  for (const src of sources) {
     const st = skillDestStatus(skillsHome, src);
     if (st === "absent" || st === "outdated") stale = true;
     if (st === "refused") refused.push(src.name);
+  }
+  // The installed manifest must match what install would write: byte-compare
+  // against the repo-root workflows.json when the run-workflow skill is ours.
+  // A stale or extra installed copy (repo manifest changed, removed, or went
+  // malformed) counts as stale; a refused skill's files are the user's own.
+  const runWorkflow = sources.find(s => s.name === "run-workflow");
+  if (runWorkflow && !refused.includes("run-workflow")) {
+    const manifest = path.join(root, "workflows.json");
+    const expected = manifestState(root).valid && fs.existsSync(manifest)
+      ? fs.readFileSync(manifest, "utf8")
+      : null;
+    let installed = null;
+    try { installed = fs.readFileSync(path.join(skillsHome, "run-workflow", "workflows.json"), "utf8"); } catch {}
+    if (expected !== installed) stale = true;
   }
   return { stale, refused };
 }
