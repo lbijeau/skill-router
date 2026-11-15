@@ -476,7 +476,7 @@ export function syncClaudeSkills(root, skillsHome, wfState) {
     if (state.valid && fs.existsSync(manifest)) {
       fs.mkdirSync(dir, { recursive: true });
       atomicWrite(destManifest, fs.readFileSync(manifest, "utf8"));
-    } else if (fs.existsSync(destManifest) && !isSymlink(dir)) {
+    } else if (fs.existsSync(destManifest) && !isSymlink(dir) && !isSymlink(destManifest)) {
       fs.rmSync(destManifest);
     }
   }
