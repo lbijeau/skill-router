@@ -1,0 +1,12 @@
+{
+  "workflows": [
+    {
+      "name": "design-review",
+      "description": "Brainstorm a design with superpowers, then stress-test it",
+      "steps": [
+        { "agent": "superpowers", "task": "Brainstorm the requested feature and write the design doc", "output": "docs/design.md" },
+        { "agent": "ponytail", "task": "Critique docs/design.md bluntly; write your verdict and required changes", "output": "docs/design-review.md" }
+      ]
+    }
+  ]
+}

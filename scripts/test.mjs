@@ -524,6 +524,47 @@ test("status: exit rules incl. expected absence for zero-skill entries", () => {
   clean(root);
 });
 
+test("statusOf includes a workflows count", () => {
+  const root = tmp();
+  const manifest = { repos: [
+    { name: "one", url: "https://github.com/x/y", description: "d", persona: "p" }]};
+  w(root, "repos.json", JSON.stringify(manifest));
+  w(root, "workflows.json", JSON.stringify({ workflows: [
+    { name: "design-review", description: "two-step review", steps: [
+      { agent: "one", task: "write the design", output: "docs/design.md" },
+      { agent: "one", task: "critique it", output: "docs/review.md" },
+    ]},
+  ]}));
+  const s = gen.statusOf(root, manifest);
+  eq(s.workflows, 1);
+  eq(s.workflowsError, undefined);
+  clean(root);
+});
+
+test("statusOf is unchanged when workflows.json is absent", () => {
+  const root = tmp();
+  const manifest = { repos: [
+    { name: "one", url: "https://github.com/x/y", description: "d", persona: "p" }]};
+  w(root, "repos.json", JSON.stringify(manifest));
+  const s = gen.statusOf(root, manifest);
+  eq(s.workflows, 0);
+  eq(s.workflowsError, undefined);
+  clean(root);
+});
+
+test("statusOf surfaces a malformed workflows.json as an error state", () => {
+  const root = tmp();
+  const manifest = { repos: [
+    { name: "one", url: "https://github.com/x/y", description: "d", persona: "p" }]};
+  w(root, "repos.json", JSON.stringify(manifest));
+  w(root, "workflows.json", "{ not json !!!");
+  const s = gen.statusOf(root, manifest);
+  eq(s.workflows, 0);
+  eq(/workflows/.test(s.workflowsError), true);
+  eq(s.warnings.some(x => /workflows/.test(x)), true);
+  clean(root);
+});
+
 test("status: zero-skill leftover TOML is stale and fails exit", () => {
   const root = tmp();
   const manifest = { repos: [
@@ -1548,6 +1589,59 @@ test("syncGlobalSkills: copies byte-identical, idempotent, skips non-skills", ()
   clean(root); clean(skillsHome);
 });
 
+test("syncGlobalSkills installs run-workflow alongside route-skill", () => {
+  const root = tmp();
+  w(root, "global-skills/route-skill/SKILL.md", "---\nname: route-skill\ndescription: d\n---\nbody\n");
+  w(root, "global-skills/run-workflow/SKILL.md", "---\nname: run-workflow\ndescription: d\n---\nbody\n");
+  const home = path.join(root, "skills-home");
+  const { written } = gen.syncGlobalSkills(root, home);
+  eq(written.filter(f => f.includes("run-workflow")).length, 1);
+  clean(root);
+});
+
+test("syncGlobalSkills copies the repo-root workflows.json into the installed run-workflow dir", () => {
+  const root = tmp(); const skillsHome = tmp();
+  const manifest = JSON.stringify({ workflows: [] });
+  w(root, "repos.json", JSON.stringify({ repos: [] }));
+  w(root, "global-skills/run-workflow/SKILL.md", "---\nname: run-workflow\ndescription: d\n---\nbody\n");
+  w(root, "workflows.json", manifest);
+  gen.syncGlobalSkills(root, skillsHome);
+  eq(fs.readFileSync(path.join(skillsHome, "run-workflow", "workflows.json"), "utf8"), manifest);
+  clean(root); clean(skillsHome);
+});
+
+test("syncGlobalSkills skips the manifest copy silently when workflows.json is absent", () => {
+  const root = tmp(); const skillsHome = tmp();
+  w(root, "global-skills/run-workflow/SKILL.md", "---\nname: run-workflow\ndescription: d\n---\nbody\n");
+  const r = gen.syncGlobalSkills(root, skillsHome);
+  eq(r.written.length, 1);
+  eq(fs.existsSync(path.join(skillsHome, "run-workflow", "workflows.json")), false);
+  clean(root); clean(skillsHome);
+});
+
+test("syncGlobalSkills does not copy a malformed workflows.json into the installed run-workflow dir", () => {
+  const root = tmp(); const skillsHome = tmp();
+  w(root, "global-skills/run-workflow/SKILL.md", "---\nname: run-workflow\ndescription: d\n---\nbody\n");
+  w(root, "workflows.json", JSON.stringify({ workflows: "not-an-array" }));
+  gen.syncGlobalSkills(root, skillsHome);
+  eq(fs.existsSync(path.join(skillsHome, "run-workflow", "workflows.json")), false);
+  clean(root); clean(skillsHome);
+});
+
+test("pi run-workflow SKILL.md names the manifest, dispatch loop, and checkpoint rule", () => {
+  const body = fs.readFileSync(path.join(gen.REPO_ROOT, "global-skills/run-workflow/SKILL.md"), "utf8");
+  assert(/workflows\.json/.test(body));
+  assert(/subagent/.test(body));
+  assert(/checkpoint/i.test(body));
+});
+
+test("claude run-workflow SKILL.md names the manifest, Task tool, and checkpoint rule", () => {
+  const body = fs.readFileSync(path.join(gen.REPO_ROOT, "global-skills-claude/run-workflow/SKILL.md"), "utf8");
+  assert(/workflows\.json/.test(body));
+  assert(/Task/.test(body));
+  assert(/checkpoint/i.test(body));
+});
+
 test("renderRouterAgent: frontmatter shape and persona body", () => {
   const home = "/fake/home";
   const out = gen.renderRouterAgent({ root: "/fake/home/sr", home });
@@ -1924,7 +2018,8 @@ test("printStatus: catalog/router values align under their header columns", () =
   eq(values.slice(catalogStart, catalogStart + 10).trim(), "in-sync");
   eq(values.slice(catalogStart + 10).trim(), "in-sync");
   eq(lines[2].slice(claudeStart, catalogStart).trim(), "in-sync");    // claude column under its header
-  eq(lines[3], "claude install: n/a");                                // line after the data rows
+  eq(lines[3], "workflows: 0");                                    // workflows count line after the data rows
+  eq(lines[4], "claude install: n/a");
   clean(root);
 });
 
@@ -2420,6 +2515,30 @@ test("syncClaudeSkills: writes route-skill; refuses unmarked file and symlinked 
   const r3 = gen.syncClaudeSkills(root, home);
   eq(r3.refused.join(), "route-skill");
   eq(fs.lstatSync(path.join(home, "route-skill/SKILL.md")).isSymbolicLink(), true);
+  clean(root); clean(path.dirname(home));
+});
+
+test("syncClaudeSkills installs run-workflow alongside route-skill", () => {
+  const root = tmp(); const home = path.join(tmp(), "skills");
+  const src = fs.readFileSync(path.join(gen.REPO_ROOT, "global-skills-claude/route-skill/SKILL.md"), "utf8");
+  w(root, "global-skills-claude/route-skill/SKILL.md", src);
+  w(root, "global-skills-claude/run-workflow/SKILL.md", "---\nname: run-workflow\ndescription: d\n---\nbody\n");
+  const manifest = JSON.stringify({ workflows: [] });
+  w(root, "repos.json", JSON.stringify({ repos: [] }));
+  w(root, "workflows.json", manifest);
+  const r = gen.syncClaudeSkills(root, home);
+  eq(r.written.includes("run-workflow"), true);
+  eq(fs.readFileSync(path.join(home, "run-workflow", "workflows.json"), "utf8"), manifest);
+  clean(root); clean(path.dirname(home));
+});
+
+test("syncClaudeSkills does not copy a malformed workflows.json into the installed run-workflow dir", () => {
+  const root = tmp(); const home = path.join(tmp(), "skills");
+  w(root, "global-skills-claude/route-skill/SKILL.md", fs.readFileSync(path.join(gen.REPO_ROOT, "global-skills-claude/route-skill/SKILL.md"), "utf8"));
+  w(root, "global-skills-claude/run-workflow/SKILL.md", "---\nname: run-workflow\ndescription: d\n---\nbody\n");
+  w(root, "workflows.json", JSON.stringify({ workflows: "not-an-array" }));
+  gen.syncClaudeSkills(root, home);
+  eq(fs.existsSync(path.join(home, "run-workflow", "workflows.json")), false);
   clean(root); clean(path.dirname(home));
 });
 
@@ -3250,6 +3369,117 @@ test("landing page: masthead, lede and hero stats match repos.json, catalog and 
   eq(html.includes(`<b>${repos}</b>pinned repos`), true);
   eq(html.includes(`<b>${skills}</b>skills on the board`), true);
   eq(html.includes("<b>3</b>targets wired"), true);
+});
+
+
+import * as wf from "./workflows.mjs";
+
+function wfRoot(repos) {
+  const root = tmp();
+  w(root, "repos.json", JSON.stringify({ repos }));
+  return root;
+}
+
+test("loadWorkflows returns [] when workflows.json is absent", () => {
+  const root = tmp();
+  w(root, "repos.json", JSON.stringify({ repos: [
+    { name: "a", url: "https://x/a", description: "d", persona: "p" } ] }));
+  const { workflows } = wf.loadWorkflows(root);
+  eq(workflows.length, 0);
+  clean(root);
+});
+
+test("loadWorkflows returns a valid workflow with steps", () => {
+  const root = tmp();
+  w(root, "repos.json", JSON.stringify({ repos: [
+    { name: "a", url: "https://x/a", description: "d", persona: "p" },
+    { name: "b", url: "https://x/b", description: "d", persona: "p" } ] }));
+  w(root, "workflows.json", JSON.stringify({ workflows: [
+    { name: "review", description: "Two-pass review",
+      steps: [
+        { agent: "a", task: "Review the code", output: "docs/review-a.md" },
+        { agent: "b", task: "Audit the review", output: "docs/review-b.md" } ] } ] }));
+  const { workflows } = wf.loadWorkflows(root);
+  eq(workflows.length, 1);
+  eq(workflows[0].name, "review");
+  eq(workflows[0].steps[1].agent, "b");
+  clean(root);
+});
+
+test("loadWorkflows rejects unknown agent names", () => {
+  const root = wfRoot([
+    { name: "a", url: "https://x/a", description: "d", persona: "p" } ]);
+  w(root, "workflows.json", JSON.stringify({ workflows: [
+    { name: "review", description: "Two-pass review",
+      steps: [ { agent: "zzz", task: "Review the code", output: "docs/review-a.md" } ] } ] }));
+  assert.throws(() => wf.loadWorkflows(root), /review/);
+  assert.throws(() => wf.loadWorkflows(root), /zzz/);
+  clean(root);
+});
+
+test("loadWorkflows rejects empty steps, missing fields, bad names", () => {
+  const repos = [ { name: "a", url: "https://x/a", description: "d", persona: "p" } ];
+  {
+    const root = wfRoot(repos);
+    w(root, "workflows.json", JSON.stringify({ workflows: [
+      { name: "review", description: "Two-pass review", steps: [] } ] }));
+    assert.throws(() => wf.loadWorkflows(root), /review/);
+    clean(root);
+  }
+  {
+    const root = wfRoot(repos);
+    w(root, "workflows.json", JSON.stringify({ workflows: [
+      { name: "review", description: "Two-pass review",
+        steps: [ { agent: "a", task: "Review the code" } ] } ] }));
+    assert.throws(() => wf.loadWorkflows(root), /review/);
+    clean(root);
+  }
+  {
+    const root = wfRoot(repos);
+    w(root, "workflows.json", JSON.stringify({ workflows: [
+      { name: "Bad_Name", description: "Two-pass review",
+        steps: [ { agent: "a", task: "Review the code", output: "docs/out.md" } ] } ] }));
+    assert.throws(() => wf.loadWorkflows(root), /Bad_Name/);
+    clean(root);
+  }
+});
+
+test("loadWorkflows rejects duplicate workflow names", () => {
+  const root = wfRoot([
+    { name: "a", url: "https://x/a", description: "d", persona: "p" } ]);
+  const entry = {
+    name: "review", description: "Two-pass review",
+    steps: [ { agent: "a", task: "Review the code", output: "docs/out.md" } ] };
+  w(root, "workflows.json", JSON.stringify({ workflows: [entry, entry] }));
+  assert.throws(() => wf.loadWorkflows(root), /review/);
+  assert.throws(() => wf.loadWorkflows(root), /duplicate/);
+  clean(root);
+});
+
+test("loadWorkflows rejects escaping output paths", () => {
+  const repos = [ { name: "a", url: "https://x/a", description: "d", persona: "p" } ];
+  for (const output of ["../outside.md", "/abs.md", "..\\outside.md"]) {
+    const root = wfRoot(repos);
+    w(root, "workflows.json", JSON.stringify({ workflows: [
+      { name: "review", description: "Two-pass review",
+        steps: [ { agent: "a", task: "Review the code", output } ] } ] }));
+    assert.throws(() => wf.loadWorkflows(root), /review/, `output: ${output}`);
+    clean(root);
+  }
+});
+
+test("loadWorkflows rejects duplicate output paths within a workflow", () => {
+  const root = wfRoot([
+    { name: "a", url: "https://x/a", description: "d", persona: "p" },
+    { name: "b", url: "https://x/b", description: "d", persona: "p" } ]);
+  w(root, "workflows.json", JSON.stringify({ workflows: [
+    { name: "review", description: "Two-pass review",
+      steps: [
+        { agent: "a", task: "Review the code", output: "docs/out.md" },
+        { agent: "b", task: "Audit the review", output: "docs/out.md" } ] } ] }));
+  assert.throws(() => wf.loadWorkflows(root), /review/);
+  assert.throws(() => wf.loadWorkflows(root), /docs\/out\.md/);
+  clean(root);
 });
 
 process.exitCode = await (async () => {
