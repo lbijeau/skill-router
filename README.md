@@ -140,7 +140,32 @@ Then:
 A **workflow** chains generated agents into an ordered sequence: a name,
 steps, and for each step an agent, a task, and an output file the agent
 writes. Workflows live in an optional `workflows.json` at the repo root —
-the repo works fine without one.
+the repo works fine without one. It currently holds one workflow,
+`design-review`:
+
+```json
+{
+  "workflows": [
+    {
+      "name": "design-review",
+      "description": "Brainstorm a design with superpowers, then stress-test it",
+      "steps": [
+        { "agent": "superpowers", "task": "Brainstorm the requested feature and write the design doc", "output": "docs/design.md" },
+        { "agent": "ponytail", "task": "Critique docs/design.md bluntly; write your verdict and required changes", "output": "docs/design-review.md" }
+      ]
+    }
+  ]
+}
+```
+
+Run one through the `run-workflow` skill, installed for pi
+(`global-skills/run-workflow/`) and Claude Code
+(`global-skills-claude/run-workflow/`), with the manifest copied next to
+each `SKILL.md`. The skill dispatches each step's agent in order, verifies
+the step's output file exists and is non-empty, and checkpoints with you
+between every step — one human pause per step, never two steps without a
+human between them. Resuming a workflow skips any step whose output file
+already exists and is non-empty.
 
 On **Vibe** there is no skill runner (skills are disabled for Vibe
 agents), so run a workflow by reading `workflows.json` yourself and
@@ -148,6 +173,10 @@ spawning each step's agent in order — verify the output file after each
 step and pause for a human between steps, the same contract the pi and
 Claude skills enforce. A generated Vibe orchestrator agent may follow
 later.
+
+Why workflows live here rather than in their own repository — and the
+trigger for splitting them out (a second agent source appearing) — is
+[ADR-009](docs/decisions/ADR-009-workflows-internal-seam.md).
 
 ## Trust model
 
