@@ -135,6 +135,20 @@ Then:
 - Removing or renaming a manifest entry prunes its agent file and clone on
   the next run.
 
+## Workflows
+
+A **workflow** chains generated agents into an ordered sequence: a name,
+steps, and for each step an agent, a task, and an output file the agent
+writes. Workflows live in an optional `workflows.json` at the repo root —
+the repo works fine without one.
+
+On **Vibe** there is no skill runner (skills are disabled for Vibe
+agents), so run a workflow by reading `workflows.json` yourself and
+spawning each step's agent in order — verify the output file after each
+step and pause for a human between steps, the same contract the pi and
+Claude skills enforce. A generated Vibe orchestrator agent may follow
+later.
+
 ## Trust model
 
 - `repos.json` entries can pin a commit (`"pin": "<sha>"`, hex, 7-40
